@@ -1,4 +1,4 @@
-# CMakeLists.txt - C++ Version
+# CMakeLists.txt - C++ Refactoring Step 2
 
 cmake_minimum_required(VERSION 3.13)
 include(pico_sdk_import.cmake)
@@ -11,11 +11,12 @@ pico_sdk_init()
 
 set(TARGET_NAME hog_keyboard_demo)
 add_executable(${TARGET_NAME}
-    # --- C++ File Changes ---
     hog_keyboard_demo.cpp
+    HidKeyboard.cpp
+    # Add the new KeyboardLayout class file
+    KeyboardLayout.cpp
     picow_bt_example_common.cpp
     picow_bt_example_background.cpp
-    # --- End of Changes ---
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/hids_device.c
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/battery_service_server.c
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/device_information_service_server.c
@@ -33,12 +34,7 @@ target_compile_definitions(${TARGET_NAME} PRIVATE
     CYW43_LWIP=0
 )
 
-# --- THIS IS THE FIX ---
-# We use a standard CMake command to pass a definition directly to the linker.
-# This tells the linker to allocate a 16KB stack, preventing the crash.
-# This method is guaranteed to work with all Pico SDK versions.
 target_link_options(${TARGET_NAME} PRIVATE "-Wl,--defsym=__STACK_SIZE=16384")
-# --- END OF FIX ---
 
 target_link_libraries(${TARGET_NAME} PRIVATE
     pico_stdlib
