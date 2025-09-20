@@ -1,24 +1,29 @@
 #include "btstack_stdin.h"
-#include "HidKeyboard.h" // Now includes the full template implementation
-#include "KeyboardLayout.h"
+#include "HidKeyboard.h"
+#include "BtStackManager.h"
 
-// --- FIX: Instantiate the template with the desired layout ---
-HidKeyboard<USKeyboardLayout> g_keyboard;
+// Define the keyboard object. It is no longer a global used by callbacks.
+static HidKeyboard<USKeyboardLayout> keyboard;
 
-// C-style function to forward stdin processing to our class instance.
+// stdin processing now uses a pointer to our keyboard object
 static void stdin_process_forwarder(char character) {
-    g_keyboard.processStdin(character);
+    keyboard.processStdin(character);
 }
 
-// The main entry point for the BTstack library.
+// The main entry point for the BTstack library
 extern "C" int btstack_main(void) {
     
-    g_keyboard.setup();
+    // Get the manager singleton and register our keyboard as the handler
+    BtStackManager::getInstance().registerHandler(&keyboard);
+    
+    // Setup the keyboard logic
+    keyboard.setup();
 
 #ifdef HAVE_BTSTACK_STDIN
     btstack_stdin_setup(stdin_process_forwarder);
 #endif
 
-    g_keyboard.powerOn();
+    // Power on the bluetooth stack
+    keyboard.powerOn();
     return 0;
 }

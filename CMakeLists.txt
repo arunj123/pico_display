@@ -1,4 +1,4 @@
-# CMakeLists.txt - C++ Refactoring Step 3
+# CMakeLists.txt - C++ Refactoring Step 5 (Corrected)
 
 cmake_minimum_required(VERSION 3.13)
 include(pico_sdk_import.cmake)
@@ -12,7 +12,8 @@ pico_sdk_init()
 set(TARGET_NAME hog_keyboard_demo)
 add_executable(${TARGET_NAME}
     hog_keyboard_demo.cpp
-    # HidKeyboard.cpp is removed as it's now a header-only template
+    HidKeyboard.cpp
+    BtStackManager.cpp
     KeyboardLayout.cpp
     picow_bt_example_common.cpp
     picow_bt_example_background.cpp
@@ -30,6 +31,7 @@ target_include_directories(${TARGET_NAME} PRIVATE
 
 target_compile_definitions(${TARGET_NAME} PRIVATE
     PICO_STDIO_USB_CONNECT_WAIT_TIMEOUT_MS=3000
+    # --- FIX: Corrected the typo from CYW4L3 to CYW43 ---
     CYW43_LWIP=0
 )
 
