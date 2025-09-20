@@ -1,29 +1,32 @@
-#include "btstack_stdin.h"
 #include "HidKeyboard.h"
 #include "BtStackManager.h"
+#include "I_InputController.h"
 
-// Define the keyboard object. It is no longer a global used by callbacks.
-static HidKeyboard<USKeyboardLayout> keyboard;
-
-// stdin processing now uses a pointer to our keyboard object
-static void stdin_process_forwarder(char character) {
-    keyboard.processStdin(character);
-}
+// --- Include the concrete controller headers ---
+#ifdef HAVE_BTSTACK_STDIN
+#include "StdinController.h"
+#else
+#include "DemoController.h"
+#endif
 
 // The main entry point for the BTstack library
 extern "C" int btstack_main(void) {
+    // 1. Create the application objects
+    static HidKeyboard<USKeyboardLayout> keyboard;
     
-    // Get the manager singleton and register our keyboard as the handler
-    BtStackManager::getInstance().registerHandler(&keyboard);
-    
-    // Setup the keyboard logic
-    keyboard.setup();
-
 #ifdef HAVE_BTSTACK_STDIN
-    btstack_stdin_setup(stdin_process_forwarder);
+    static StdinController inputController;
+#else
+    static DemoController inputController;
 #endif
 
-    // Power on the bluetooth stack
+    // 2. Connect the components
+    keyboard.setInputController(&inputController);
+    inputController.init(&keyboard);
+    BtStackManager::getInstance().registerHandler(&keyboard);
+    
+    // 3. Setup and run
+    keyboard.setup();
     keyboard.powerOn();
     return 0;
 }

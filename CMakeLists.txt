@@ -1,4 +1,4 @@
-# CMakeLists.txt - C++ Refactoring Step 5 (Corrected)
+# CMakeLists.txt - C++ Refactoring Step 7
 
 cmake_minimum_required(VERSION 3.13)
 include(pico_sdk_import.cmake)
@@ -15,6 +15,9 @@ add_executable(${TARGET_NAME}
     HidKeyboard.cpp
     BtStackManager.cpp
     KeyboardLayout.cpp
+    # Add the new controller source files
+    StdinController.cpp
+    DemoController.cpp
     picow_bt_example_common.cpp
     picow_bt_example_background.cpp
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/hids_device.c
@@ -31,7 +34,6 @@ target_include_directories(${TARGET_NAME} PRIVATE
 
 target_compile_definitions(${TARGET_NAME} PRIVATE
     PICO_STDIO_USB_CONNECT_WAIT_TIMEOUT_MS=3000
-    # --- FIX: Corrected the typo from CYW4L3 to CYW43 ---
     CYW43_LWIP=0
 )
 
