@@ -1,10 +1,9 @@
-#include "HidKeyboard.h"
 #include "btstack_stdin.h"
-#include <cstdio>
+#include "HidKeyboard.h" // Now includes the full template implementation
+#include "KeyboardLayout.h"
 
-// Define the single, global instance of our keyboard class.
-// The 'extern' declaration in HidKeyboard.cpp will see this.
-HidKeyboard g_keyboard;
+// --- FIX: Instantiate the template with the desired layout ---
+HidKeyboard<USKeyboardLayout> g_keyboard;
 
 // C-style function to forward stdin processing to our class instance.
 static void stdin_process_forwarder(char character) {
@@ -12,7 +11,6 @@ static void stdin_process_forwarder(char character) {
 }
 
 // The main entry point for the BTstack library.
-// This is a C function, so it must be wrapped in extern "C".
 extern "C" int btstack_main(void) {
     
     g_keyboard.setup();

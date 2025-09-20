@@ -1,4 +1,4 @@
-# CMakeLists.txt - C++ Refactoring Step 2
+# CMakeLists.txt - C++ Refactoring Step 3
 
 cmake_minimum_required(VERSION 3.13)
 include(pico_sdk_import.cmake)
@@ -12,8 +12,7 @@ pico_sdk_init()
 set(TARGET_NAME hog_keyboard_demo)
 add_executable(${TARGET_NAME}
     hog_keyboard_demo.cpp
-    HidKeyboard.cpp
-    # Add the new KeyboardLayout class file
+    # HidKeyboard.cpp is removed as it's now a header-only template
     KeyboardLayout.cpp
     picow_bt_example_common.cpp
     picow_bt_example_background.cpp

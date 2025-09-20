@@ -9,20 +9,14 @@ struct Keypress {
     uint8_t modifier;
 };
 
-// Abstract base class for all keyboard layouts
-class KeyboardLayout {
-public:
-    virtual ~KeyboardLayout() = default;
-    // Tries to find the keycode and modifier for a given character.
-    // Returns true if found, false otherwise.
-    virtual bool findKey(uint8_t character, Keypress& out_keypress) const = 0;
-};
-
+// --- FIX: The abstract base class is no longer needed for templates ---
 
 // Concrete implementation for a standard US Keyboard Layout
-class USKeyboardLayout : public KeyboardLayout {
+class USKeyboardLayout {
 public:
-    bool findKey(uint8_t character, Keypress& out_keypress) const override;
+    // The "interface" is now defined by the methods the template expects.
+    // In this case, HidKeyboard will expect a findKey method with this signature.
+    bool findKey(uint8_t character, Keypress& out_keypress) const;
 };
 
 
