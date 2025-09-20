@@ -1,4 +1,4 @@
-# CMakeLists.txt - Final Corrected Version
+# CMakeLists.txt - C++ Version
 
 cmake_minimum_required(VERSION 3.13)
 include(pico_sdk_import.cmake)
@@ -11,9 +11,11 @@ pico_sdk_init()
 
 set(TARGET_NAME hog_keyboard_demo)
 add_executable(${TARGET_NAME}
-    hog_keyboard_demo.c
-    picow_bt_example_common.c
-    picow_bt_example_background.c
+    # --- C++ File Changes ---
+    hog_keyboard_demo.cpp
+    picow_bt_example_common.cpp
+    picow_bt_example_background.cpp
+    # --- End of Changes ---
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/hids_device.c
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/battery_service_server.c
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/device_information_service_server.c

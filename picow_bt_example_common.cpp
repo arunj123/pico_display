@@ -12,6 +12,7 @@
 #include "pico/cyw43_arch.h"
 #include "pico/stdlib.h"
 #include "btstack.h"
+#include "picow_bt_example_common.h" // Good practice to include the header for this source file
 
 #if defined(WIFI_SSID) && defined(WIFI_PASSWORD)
 #define TEST_BTWIFI 1
@@ -23,7 +24,7 @@
 #endif
 
 // Start the btstack example
-int btstack_main(int argc, const char * argv[]);
+extern "C" int btstack_main(int argc, const char * argv[]);
 
 #if TEST_AUDIO
 const btstack_audio_sink_t * btstack_audio_pico_sink_get_instance(void);
@@ -66,6 +67,10 @@ static void iperf_report(void *arg, enum lwiperf_report_type report_type,
 }
 #endif
 
+
+// --- FIX: Wrap definitions in extern "C" to prevent name mangling ---
+extern "C" {
+
 int picow_bt_example_init(void) {
     // initialize CYW43 driver architecture (will enable BT if/because CYW43_ENABLE_BLUETOOTH == 1)
     if (cyw43_arch_init()) {
@@ -101,3 +106,5 @@ void picow_bt_example_main(void) {
     lwiperf_start_tcp_server_default(&iperf_report, NULL);
 #endif
 }
+
+} // extern "C"
