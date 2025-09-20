@@ -26,11 +26,7 @@ void StdinController::processCharacter(char character) {
 }
 
 void StdinController::typingTimerHandler(btstack_timer_source_t* ts) { (void)ts; }
-
-// --- FIX: Add empty implementation for the subscription event ---
-void StdinController::onHidSubscribed() {
-    // This controller is reactive, it doesn't need to do anything when connected.
-}
+void StdinController::onHidSubscribed() {}
 
 void StdinController::onReadyToSend() {
     if (!m_keyboard) return;
@@ -39,17 +35,28 @@ void StdinController::onReadyToSend() {
         uint8_t c;
         uint32_t num_bytes_read;
         btstack_ring_buffer_read(&m_ascii_input_buffer, &c, 1, &num_bytes_read);
+        
         if (num_bytes_read == 0) {
             m_state = State::Idle;
             return;
         }
+
         printf("sending: %c\n", c);
-        if (m_keyboard->sendChar(c)) {
+        
+        // --- FIX: Create the report directly in the controller ---
+        Keypress key;
+        if (m_keyboard->charToKeypress(c, key)) {
+            HidReport report{};
+            report.modifier = key.modifier;
+            report.setKey(key.keycode);
+            m_keyboard->sendReport(report);
+            
             m_state = State::WaitingToSendKeyUp;
             m_keyboard->requestToSend();
         }
     } else if (m_state == State::WaitingToSendKeyUp) {
         m_keyboard->sendReport(HidReport::keyUp());
+        
         if (btstack_ring_buffer_bytes_available(&m_ascii_input_buffer)) {
             m_state = State::WaitingToSendKey;
             m_keyboard->requestToSend();

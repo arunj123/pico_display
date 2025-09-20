@@ -18,10 +18,9 @@ BtStackManager::BtStackManager() : m_handler(nullptr) {
     memset(&m_sm_event_callback_reg, 0, sizeof(m_sm_event_callback_reg));
 }
 
-void BtStackManager::registerHandler(I_HidKeyboardHandler* handler) {
+void BtStackManager::registerHandler(I_BtStackHandler* handler) {
     m_handler = handler;
 
-    // Now that we have a handler, we can register the callbacks with BTstack
     m_hci_event_callback_reg.callback = &BtStackManager::packetHandlerForwarder;
     hci_add_event_handler(&m_hci_event_callback_reg);
 
@@ -41,7 +40,7 @@ void BtStackManager::packetHandlerForwarder(uint8_t packet_type, uint16_t channe
 
 void BtStackManager::canSendNowForwarder() {
     if (g_instance && g_instance->m_handler) {
-        g_instance->m_handler->canSendNow();
+        g_instance->m_handler->onReadyToSend();
     }
 }
 
