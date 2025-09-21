@@ -16,7 +16,7 @@ public:
     void handle_gpio_irq(uint gpio, uint32_t events);
 
 private:
-    // Timer callback handlers (must be static for C-style callbacks)
+    // Timer callback handlers
     static void polling_handler_forwarder(btstack_timer_source_t* ts);
     static void release_handler_forwarder(btstack_timer_source_t* ts);
     static void battery_timer_handler_forwarder(btstack_timer_source_t* ts);
@@ -36,8 +36,10 @@ private:
     
     int m_processed_rotation = 0;
     uint8_t m_battery_level = 100;
-    uint32_t m_last_press_time_ms = 0;
     volatile bool m_button_pressed_flag = false;
+
+    // We only need the timestamp for the lockout period
+    uint32_t m_last_press_time_ms = 0; 
 };
 
 #endif // MEDIA_APPLICATION_H

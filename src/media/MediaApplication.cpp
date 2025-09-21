@@ -29,8 +29,8 @@ MediaApplication::MediaApplication() :
 
     // --- Update timer handler setup ---
     // The same release handler function can be used for both timers
-    btstack_run_loop_set_timer_handler(&m_encoder_release_timer, &MediaApplication::release_handler_forwarder); // <-- RENAMED
-    btstack_run_loop_set_timer_handler(&m_button_release_timer, &MediaApplication::release_handler_forwarder);  // <-- ADDED
+    btstack_run_loop_set_timer_handler(&m_encoder_release_timer, &MediaApplication::release_handler_forwarder);
+    btstack_run_loop_set_timer_handler(&m_button_release_timer, &MediaApplication::release_handler_forwarder);
     btstack_run_loop_set_timer_handler(&m_polling_timer, &MediaApplication::polling_handler_forwarder);
     btstack_run_loop_set_timer_handler(&m_battery_timer, &MediaApplication::battery_timer_handler_forwarder);
     
@@ -41,8 +41,6 @@ MediaApplication::MediaApplication() :
     gpio_init(ENCODER_PIN_KEY);
     gpio_set_dir(ENCODER_PIN_KEY, GPIO_IN);
     gpio_pull_up(ENCODER_PIN_KEY);
-    
-    // Set up the interrupt (only for falling edge - a button press)
     gpio_set_irq_enabled_with_callback(ENCODER_PIN_KEY, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
 }
 
@@ -63,16 +61,19 @@ void MediaApplication::run() {
 }
 
 void MediaApplication::handle_gpio_irq(uint gpio, uint32_t events) {
-    // We only care about the encoder key pin
     if (gpio != ENCODER_PIN_KEY) return;
-
+    
     uint32_t current_time_ms = to_ms_since_boot(get_absolute_time());
 
-    // Debounce and set flag. DO NOT CALL OTHER FUNCTIONS.
+    // Check if enough time has passed since the last valid press
     if ((current_time_ms - m_last_press_time_ms) > DEBOUNCE_DELAY_MS) {
+        // If yes, this is a new, valid press.
+        // Update the timestamp to start a new lockout period.
         m_last_press_time_ms = current_time_ms;
+        // Set the flag for the main loop to process.
         m_button_pressed_flag = true;
     }
+    // If not enough time has passed, do nothing. This ignores all bounces.
 }
 
 // --- Static Forwarders to bridge C-style callbacks to C++ methods ---
@@ -100,33 +101,28 @@ void MediaApplication::battery_timer_handler_forwarder(btstack_timer_source_t* t
 // --- Member Function Implementations ---
 void MediaApplication::polling_handler() {
     if (m_media_controller.isConnected()) {
-        // --- 1. Handle Encoder Rotation ---
         int current_rotation = m_encoder.get_rotation();
+        int delta = current_rotation - m_processed_rotation;
 
-        if (current_rotation > m_processed_rotation) {
+        if (delta >= ENCODER_COUNTS_PER_STEP) {
             printf("Volume Up (Target: %d, Processed: %d)\n", current_rotation, m_processed_rotation);
             m_media_controller.increaseVolume();
-            // Use the DEDICATED timer for the encoder
             btstack_run_loop_set_timer(&m_encoder_release_timer, RELEASE_DELAY_MS);
             btstack_run_loop_add_timer(&m_encoder_release_timer);
-            m_processed_rotation++;
+            m_processed_rotation += ENCODER_COUNTS_PER_STEP;
         } 
-        else if (current_rotation < m_processed_rotation) {
+        else if (delta <= -ENCODER_COUNTS_PER_STEP) {
             printf("Volume Down (Target: %d, Processed: %d)\n", current_rotation, m_processed_rotation);
             m_media_controller.decreaseVolume();
-            // Use the DEDICATED timer for the encoder
             btstack_run_loop_set_timer(&m_encoder_release_timer, RELEASE_DELAY_MS);
             btstack_run_loop_add_timer(&m_encoder_release_timer);
-            m_processed_rotation--;
+            m_processed_rotation -= ENCODER_COUNTS_PER_STEP;
         }
 
-        // --- 2. Handle Button Press ---
         if (m_button_pressed_flag) {
             m_button_pressed_flag = false;
             printf("Mute button pressed\n");
-            
             m_media_controller.mute();
-            // Use the DEDICATED timer for the button
             btstack_run_loop_set_timer(&m_button_release_timer, RELEASE_DELAY_MS);
             btstack_run_loop_add_timer(&m_button_release_timer);
         }
