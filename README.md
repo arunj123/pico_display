@@ -6,7 +6,7 @@ This project provides implementations for a standalone Bluetooth Low Energy (BLE
 
 This project can be built to produce two different binaries:
 
-1.  **Keyboard Example:** A BLE keyboard example.
+1.  **Keyboard Example:** A BLE keyboard example, initially taken from the pico-sdk and then modified to build as C++.
 2.  **Media Controller:** A media controller that uses a rotary encoder for input.
 
 ## Wiring

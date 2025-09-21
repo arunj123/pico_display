@@ -64,7 +64,7 @@ namespace BleDescriptors {
     }
 
     namespace Media {
-        // HID Report Descriptor for Consumer Controls (Volume Up/Down)
+        // HID Report Descriptor for Consumer Controls ---
         constexpr uint8_t hid_descriptor[] = {
             0x05, 0x0C,       // Usage Page (Consumer)
             0x09, 0x01,       // Usage (Consumer Control)
@@ -73,11 +73,16 @@ namespace BleDescriptors {
             0x15, 0x00,       //   Logical Minimum (0)
             0x25, 0x01,       //   Logical Maximum (1)
             0x75, 0x01,       //   Report Size (1)
-            0x95, 0x02,       //   Report Count (2)
-            0x09, 0xE9,       //   Usage (Volume Increment)
-            0x09, 0xEA,       //   Usage (Volume Decrement)
+            0x95, 0x06,       //   Report Count (6) - We have 6 buttons
+            0x09, 0xE9,       //   Usage (Volume Increment) -> Bit 0
+            0x09, 0xEA,       //   Usage (Volume Decrement) -> Bit 1
+            0x09, 0xE2,       //   Usage (Mute)             -> Bit 2
+            0x09, 0xCD,       //   Usage (Play/Pause)       -> Bit 3
+            0x09, 0xB5,       //   Usage (Scan Next Track)  -> Bit 4
+            0x09, 0xB6,       //   Usage (Scan Previous Track)-> Bit 5
             0x81, 0x02,       //   Input (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
-            0x95, 0x06,       //   Report Count (6)
+            // Padding for the remaining 2 bits in the byte
+            0x95, 0x02,       //   Report Count (2)
             0x81, 0x03,       //   Input (Const,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
             0xC0              // End Collection
         };

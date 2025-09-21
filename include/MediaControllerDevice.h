@@ -8,12 +8,16 @@
 class MediaControllerDevice : public HidDevice {
 public:
     void setup() override;
+    void setBatteryLevel(uint8_t level);
 
-    // Public methods for controlling the device
+    // --- Media Control Methods ---
     void increaseVolume();
     void decreaseVolume();
-    void release();
-    void setBatteryLevel(uint8_t level);
+    void mute();
+    void playPause();
+    void nextTrack();
+    void previousTrack();
+    void release(); // Release all keys
 
 protected:
     const uint8_t* getHidDescriptor() const override;
