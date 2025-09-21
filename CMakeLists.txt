@@ -16,7 +16,7 @@ endif()
 # ====================================================================================
 set(PICO_BOARD pico_w CACHE STRING "Board type")
 
-include(pico_sdk_import.cmake)
+include(src/pico/pico_sdk_import.cmake)
 
 project(pico_hid_devices C CXX ASM)
 set(CMAKE_C_STANDARD 11)
@@ -26,10 +26,10 @@ pico_sdk_init()
 
 # --- Common sources shared by all targets ---
 set(COMMON_SOURCES
-    HidDevice.cpp
-    BtStackManager.cpp
-    picow_bt_example_common.cpp
-    picow_bt_example_background.cpp
+    src/hid/HidDevice.cpp
+    src/bt/BtStackManager.cpp
+    src/pico/picow_bt_example_common.cpp
+    src/pico/picow_bt_example_background.cpp
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/battery_service_server.c
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/device_information_service_server.c
 )
@@ -48,24 +48,25 @@ set(COMMON_LIBS
 set(KEYBOARD_TARGET_NAME keyboard_app)
 add_executable(${KEYBOARD_TARGET_NAME}
     # App-specific sources
-    keyboard_main.cpp
-    HidKeyboard.cpp
-    StdinController.cpp
-    DemoController.cpp
-    KeyboardLayout.cpp
+    src/keyboard/keyboard_main.cpp
+    src/hid/HidKeyboard.cpp
+    src/keyboard/StdinController.cpp
+    src/keyboard/DemoController.cpp
+    src/keyboard/KeyboardLayout.cpp
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/hids_device.c
     # Common sources
     ${COMMON_SOURCES}
 )
 
 # Add generated header for this target
-pico_btstack_make_gatt_header(${KEYBOARD_TARGET_NAME} PRIVATE hog_keyboard_demo.gatt)
+pico_btstack_make_gatt_header(${KEYBOARD_TARGET_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/keyboard/hog_keyboard_demo.gatt)
 
 # Link libraries and set options
 target_link_libraries(${KEYBOARD_TARGET_NAME} PRIVATE ${COMMON_LIBS})
 target_include_directories(${KEYBOARD_TARGET_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/config
+    ${CMAKE_CURRENT_LIST_DIR}/include
 )
 target_link_options(${KEYBOARD_TARGET_NAME} PRIVATE "-Wl,--defsym=__STACK_SIZE=16384")
 target_compile_definitions(${KEYBOARD_TARGET_NAME} PRIVATE PICO_STDIO_USB_CONNECT_WAIT_TIMEOUT_MS=3000 CYW43_LWIP=0)
@@ -77,18 +78,18 @@ pico_add_extra_outputs(${KEYBOARD_TARGET_NAME})
 set(MEDIA_TARGET_NAME media_app)
 add_executable(${MEDIA_TARGET_NAME}
     # App-specific sources
-    media_main.cpp
-    MediaControllerDevice.cpp
-    MediaApplication.cpp
-    RotaryEncoder.cpp
+    src/media/media_main.cpp
+    src/media/MediaControllerDevice.cpp
+    src/media/MediaApplication.cpp
+    src/pico/RotaryEncoder.cpp
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/hids_device.c
     # Common sources
     ${COMMON_SOURCES}
 )
 
 # Add generated headers for this target
-pico_generate_pio_header(${MEDIA_TARGET_NAME}  ${CMAKE_CURRENT_SOURCE_DIR}/pio_rotary_encoder.pio)
-pico_btstack_make_gatt_header(${MEDIA_TARGET_NAME} PRIVATE media_controller.gatt)
+pico_generate_pio_header(${MEDIA_TARGET_NAME}  ${CMAKE_CURRENT_SOURCE_DIR}/src/pico/pio_rotary_encoder.pio)
+pico_btstack_make_gatt_header(${MEDIA_TARGET_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/media/media_controller.gatt)
 
 # Link libraries and set options
 target_link_libraries(${MEDIA_TARGET_NAME} PRIVATE 
@@ -98,6 +99,7 @@ target_link_libraries(${MEDIA_TARGET_NAME} PRIVATE
 target_include_directories(${MEDIA_TARGET_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/config
+    ${CMAKE_CURRENT_LIST_DIR}/include
 )
 target_link_options(${MEDIA_TARGET_NAME} PRIVATE "-Wl,--defsym=__STACK_SIZE=16384")
 target_compile_definitions(${MEDIA_TARGET_NAME} PRIVATE PICO_STDIO_USB_CONNECT_WAIT_TIMEOUT_MS=3000 CYW43_LWIP=0)
