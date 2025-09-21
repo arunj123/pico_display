@@ -1,6 +1,9 @@
+// File: MediaControllerDevice.cpp
+
 #include "MediaControllerDevice.h"
 #include "media_controller.h"
 #include "BleDescriptors.h"
+#include "ble/gatt-service/battery_service_server.h"
 
 // --- Implementation of HidDevice virtual methods ---
 
@@ -10,10 +13,15 @@ void MediaControllerDevice::setup() {
 
     // 2. Perform media-controller-specific setup
     // This profile_data now comes from media_controller.h
-    att_server_init(profile_data, nullptr, nullptr); 
+    att_server_init(profile_data, nullptr, nullptr);
     hids_device_init(0, getHidDescriptor(), getHidDescriptorSize());
+
     battery_service_server_init(100);
+
     device_information_service_server_init();
+    device_information_service_server_set_manufacturer_name("Pico Projects");
+    device_information_service_server_set_model_number("PIO Encoder v1.0");
+    device_information_service_server_set_serial_number("12345678");
 
     bd_addr_t null_addr;
     memset(null_addr, 0, 6);
@@ -22,6 +30,11 @@ void MediaControllerDevice::setup() {
     gap_advertisements_enable(1);
 }
 
+void MediaControllerDevice::setBatteryLevel(uint8_t level) {
+    battery_service_server_set_battery_value(level);
+}
+
+// --- Unchanged Methods ---
 const uint8_t* MediaControllerDevice::getHidDescriptor() const {
     return BleDescriptors::Media::hid_descriptor;
 }
