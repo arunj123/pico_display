@@ -1,5 +1,5 @@
 #include "MediaControllerDevice.h"
-#include "hog_keyboard_demo.h"
+#include "media_controller.h"
 #include "BleDescriptors.h"
 
 // --- Implementation of HidDevice virtual methods ---
@@ -9,7 +9,8 @@ void MediaControllerDevice::setup() {
     HidDevice::setup();
 
     // 2. Perform media-controller-specific setup
-    att_server_init(profile_data, nullptr, nullptr);
+    // This profile_data now comes from media_controller.h
+    att_server_init(profile_data, nullptr, nullptr); 
     hids_device_init(0, getHidDescriptor(), getHidDescriptorSize());
     battery_service_server_init(100);
     device_information_service_server_init();

@@ -58,13 +58,15 @@ add_executable(${KEYBOARD_TARGET_NAME}
     ${COMMON_SOURCES}
 )
 
-target_link_libraries(${KEYBOARD_TARGET_NAME} PRIVATE ${COMMON_LIBS})
+# Add generated header for this target
+pico_btstack_make_gatt_header(${KEYBOARD_TARGET_NAME} PRIVATE hog_keyboard_demo.gatt)
 
+# Link libraries and set options
+target_link_libraries(${KEYBOARD_TARGET_NAME} PRIVATE ${COMMON_LIBS})
 target_include_directories(${KEYBOARD_TARGET_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/config
 )
-pico_btstack_make_gatt_header(${KEYBOARD_TARGET_NAME} PRIVATE hog_keyboard_demo.gatt)
 target_link_options(${KEYBOARD_TARGET_NAME} PRIVATE "-Wl,--defsym=__STACK_SIZE=16384")
 target_compile_definitions(${KEYBOARD_TARGET_NAME} PRIVATE PICO_STDIO_USB_CONNECT_WAIT_TIMEOUT_MS=3000 CYW43_LWIP=0)
 pico_enable_stdio_uart(${KEYBOARD_TARGET_NAME} 1)
@@ -77,18 +79,25 @@ add_executable(${MEDIA_TARGET_NAME}
     # App-specific sources
     media_main.cpp
     MediaControllerDevice.cpp
+    RotaryEncoder.cpp
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/hids_device.c
     # Common sources
     ${COMMON_SOURCES}
 )
 
-target_link_libraries(${MEDIA_TARGET_NAME} PRIVATE ${COMMON_LIBS})
+# Add generated headers for this target
+pico_generate_pio_header(${MEDIA_TARGET_NAME}  ${CMAKE_CURRENT_SOURCE_DIR}/pio_rotary_encoder.pio)
+pico_btstack_make_gatt_header(${MEDIA_TARGET_NAME} PRIVATE media_controller.gatt)
 
+# Link libraries and set options
+target_link_libraries(${MEDIA_TARGET_NAME} PRIVATE 
+    ${COMMON_LIBS}
+    hardware_pio
+)
 target_include_directories(${MEDIA_TARGET_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/config
 )
-pico_btstack_make_gatt_header(${MEDIA_TARGET_NAME} PRIVATE hog_keyboard_demo.gatt)
 target_link_options(${MEDIA_TARGET_NAME} PRIVATE "-Wl,--defsym=__STACK_SIZE=16384")
 target_compile_definitions(${MEDIA_TARGET_NAME} PRIVATE PICO_STDIO_USB_CONNECT_WAIT_TIMEOUT_MS=3000 CYW43_LWIP=0)
 pico_enable_stdio_uart(${MEDIA_TARGET_NAME} 1)
