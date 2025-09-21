@@ -79,6 +79,7 @@ add_executable(${MEDIA_TARGET_NAME}
     # App-specific sources
     media_main.cpp
     MediaControllerDevice.cpp
+    MediaApplication.cpp
     RotaryEncoder.cpp
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/hids_device.c
     # Common sources
