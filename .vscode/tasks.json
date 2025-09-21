@@ -18,12 +18,12 @@
             }
         },
         {
-            "label": "Run Project",
+            "label": "Run keyboard_app (picotool)",
             "type": "process",
             "command": "${env:HOME}/.pico-sdk/picotool/2.2.0/picotool/picotool",
             "args": [
                 "load",
-                "${command:raspberry-pi-pico.launchTargetPath}",
+                "${workspaceFolder}/build/keyboard_app.elf",
                 "-fx"
             ],
             "presentation": {
@@ -36,9 +36,27 @@
             }
         },
         {
-            "label": "Flash",
+            "label": "Run media_app (picotool)",
             "type": "process",
-            "command": "${userHome}/.pico-sdk/openocd/0.12.0+dev/openocd.exe",
+            "command": "${env:HOME}/.pico-sdk/picotool/2.2.0/picotool/picotool",
+            "args": [
+                "load",
+                "${workspaceFolder}/build/media_app.elf",
+                "-fx"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": [],
+            "windows": {
+                "command": "${env:USERPROFILE}/.pico-sdk/picotool/2.2.0/picotool/picotool.exe"
+            }
+        },
+        {
+            "label": "Flash keyboard_app (openocd)",
+            "type": "process",
+            "command": "${userHome}/.pico-sdk/openocd/0.12.0+dev/openocd",
             "args": [
                 "-s",
                 "${userHome}/.pico-sdk/openocd/0.12.0+dev/scripts",
@@ -47,17 +65,64 @@
                 "-f",
                 "target/${command:raspberry-pi-pico.getTarget}.cfg",
                 "-c",
-                "adapter speed 5000; program \"${command:raspberry-pi-pico.launchTargetPath}\" verify reset exit"
+                "adapter speed 5000; program ${workspaceFolder}/build/keyboard_app.elf verify reset exit"
             ],
             "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
             "windows": {
                 "command": "${env:USERPROFILE}/.pico-sdk/openocd/0.12.0+dev/openocd.exe",
+                "args": [
+                    "-s",
+                    "${env:USERPROFILE}/.pico-sdk/openocd/0.12.0+dev/scripts",
+                    "-f",
+                    "interface/cmsis-dap.cfg",
+                    "-f",
+                    "target/${command:raspberry-pi-pico.getTarget}.cfg",
+                    "-c",
+                    "adapter speed 5000; program build/keyboard_app.elf verify reset exit"
+                ]
+            }
+        },
+        {
+            "label": "Flash media_app (openocd)",
+            "type": "process",
+            "command": "${userHome}/.pico-sdk/openocd/0.12.0+dev/openocd",
+            "args": [
+                "-s",
+                "${userHome}/.pico-sdk/openocd/0.12.0+dev/scripts",
+                "-f",
+                "interface/cmsis-dap.cfg",
+                "-f",
+                "target/${command:raspberry-pi-pico.getTarget}.cfg",
+                "-c",
+                "adapter speed 5000; program ${workspaceFolder}/build/media_app.elf verify reset exit"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "windows": {
+                "command": "${env:USERPROFILE}/.pico-sdk/openocd/0.12.0+dev/openocd.exe",
+                "args": [
+                    "-s",
+                    "${env:USERPROFILE}/.pico-sdk/openocd/0.12.0+dev/scripts",
+                    "-f",
+                    "interface/cmsis-dap.cfg",
+                    "-f",
+                    "target/${command:raspberry-pi-pico.getTarget}.cfg",
+                    "-c",
+                    "adapter speed 5000; program build/media_app.elf verify reset exit"
+                ] 
             }
         },
         {
             "label": "Rescue Reset",
             "type": "process",
-            "command": "${userHome}/.pico-sdk/openocd/0.12.0+dev/openocd.exe",
+            "command": "${userHome}/.pico-sdk/openocd/0.12.0+dev/openocd",
             "args": [
                 "-s",
                 "${userHome}/.pico-sdk/openocd/0.12.0+dev/scripts",
@@ -69,14 +134,28 @@
                 "adapter speed 5000; reset halt; exit"
             ],
             "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
             "windows": {
                 "command": "${env:USERPROFILE}/.pico-sdk/openocd/0.12.0+dev/openocd.exe",
+                "args": [
+                    "-s",
+                    "${env:USERPROFILE}/.pico-sdk/openocd/0.12.0+dev/scripts",
+                    "-f",
+                    "interface/cmsis-dap.cfg",
+                    "-f",
+                    "target/${command:raspberry-pi-pico.getChip}-rescue.cfg",
+                    "-c",
+                    "adapter speed 5000; reset halt; exit"
+                ]
             }
         },
         {
             "label": "Risc-V Reset (RP2350)",
             "type": "process",
-            "command": "${userHome}/.pico-sdk/openocd/0.12.0+dev/openocd.exe",
+            "command": "${userHome}/.pico-sdk/openocd/0.12.0+dev/openocd",
             "args": [
                 "-s",
                 "${userHome}/.pico-sdk/openocd/0.12.0+dev/scripts",
@@ -94,8 +173,28 @@
                 "reset halt; targets rp2350.rv0; echo [format \"Info : ARCHSEL_STATUS 0x%02x\" [read_memory 0x4012015C 8 1]]; exit"
             ],
             "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
             "windows": {
                 "command": "${env:USERPROFILE}/.pico-sdk/openocd/0.12.0+dev/openocd.exe",
+                "args": [
+                    "-s",
+                    "${env:USERPROFILE}/.pico-sdk/openocd/0.12.0+dev/scripts",
+                    "-c",
+                    "set USE_CORE { rv0 rv1 cm0 cm1 }",
+                    "-f",
+                    "interface/cmsis-dap.cfg",
+                    "-f",
+                    "target/rp2350.cfg",
+                    "-c",
+                    "adapter speed 5000; init;",
+                    "-c",
+                    "write_memory 0x40120158 8 { 0x3 }; echo [format \"Info : ARCHSEL 0x%02x\" [read_memory 0x40120158 8 1]];",
+                    "-c",
+                    "reset halt; targets rp2350.rv0; echo [format \"Info : ARCHSEL_STATUS 0x%02x\" [read_memory 0x4012015C 8 1]]; exit"
+                ]
             }
         }
     ]
