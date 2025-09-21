@@ -1,6 +1,21 @@
-# CMakeLists.txt - FINAL WORKING VERSION
-
 cmake_minimum_required(VERSION 3.13)
+
+# == DO NOT EDIT THE FOLLOWING LINES for the Raspberry Pi Pico VS Code Extension to work ==
+if(WIN32)
+    set(USERHOME $ENV{USERPROFILE})
+else()
+    set(USERHOME $ENV{HOME})
+endif()
+set(sdkVersion 2.2.0)
+set(toolchainVersion 14_2_Rel1)
+set(picotoolVersion 2.2.0)
+set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
+if (EXISTS ${picoVscode})
+    include(${picoVscode})
+endif()
+# ====================================================================================
+set(PICO_BOARD pico_w CACHE STRING "Board type")
+
 include(pico_sdk_import.cmake)
 
 project(pico_hid_devices C CXX ASM)
@@ -25,7 +40,6 @@ set(COMMON_LIBS
     pico_cyw43_arch_threadsafe_background
     pico_btstack_cyw43
     pico_btstack_ble
-    # pico_btstack_stdin  # <-- This is the correct way. The SDK handles the rest.
     hardware_adc
 )
 
@@ -79,3 +93,6 @@ target_link_options(${MEDIA_TARGET_NAME} PRIVATE "-Wl,--defsym=__STACK_SIZE=1638
 target_compile_definitions(${MEDIA_TARGET_NAME} PRIVATE PICO_STDIO_USB_CONNECT_WAIT_TIMEOUT_MS=3000 CYW43_LWIP=0)
 pico_enable_stdio_uart(${MEDIA_TARGET_NAME} 1)
 pico_add_extra_outputs(${MEDIA_TARGET_NAME})
+
+#  *  Executing task: C:\Users\arunj/.pico-sdk/openocd/0.12.0+dev/openocd.exe -s C:\Users\arunj/.pico-sdk/openocd/0.12.0+dev/scripts -f interface/cmsis-dap.cfg -f target/rp2040.cfg -c adapter speed 5000; program "C:/Users/arunj/projects/pico/picow_ble_temp_sensor/build/picow_ble_temp_sensor.elf" verify reset exit 
+# C:\Users\arunj/.pico-sdk/openocd/0.12.0+dev/openocd.exe -s C:\Users\arunj/.pico-sdk/openocd/0.12.0+dev/scripts -f interface/cmsis-dap.cfg -f target/rp2040.cfg -c "init; reset halt; flash erase_address 0x10000000 0x200000; reset; exit"
