@@ -6,6 +6,7 @@
 #include "MediaControllerDevice.h"
 #include "RotaryEncoder.h"
 #include "btstack.h"
+#include "Display.h"
 
 class MediaApplication {
 public:
@@ -37,6 +38,8 @@ private:
     // --- We only need these two for debouncing ---
     volatile bool m_button_pressed_flag = false;
     uint32_t m_last_press_time_ms = 0;
+
+    St7789Display m_display;
 };
 
 #endif // MEDIA_APPLICATION_H

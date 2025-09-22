@@ -82,13 +82,15 @@ add_executable(${MEDIA_TARGET_NAME}
     src/media/MediaControllerDevice.cpp
     src/media/MediaApplication.cpp
     src/pico/RotaryEncoder.cpp
+    src/display/Display.cpp
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/hids_device.c
     # Common sources
     ${COMMON_SOURCES}
 )
 
 # Add generated headers for this target
-pico_generate_pio_header(${MEDIA_TARGET_NAME}  ${CMAKE_CURRENT_SOURCE_DIR}/src/pico/pio_rotary_encoder.pio)
+pico_generate_pio_header(${MEDIA_TARGET_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/pico/pio_rotary_encoder.pio)
+pico_generate_pio_header(${MEDIA_TARGET_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/display/st7789_lcd.pio)
 pico_btstack_make_gatt_header(${MEDIA_TARGET_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/media/media_controller.gatt)
 
 # Link libraries and set options

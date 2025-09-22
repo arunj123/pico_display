@@ -6,6 +6,15 @@
 #include <cstdio>
 #include "hardware/gpio.h"
 
+// Color definitions for convenience
+namespace Colors {
+    constexpr uint16_t BLACK = 0x0000;
+    constexpr uint16_t BLUE = 0x001F;
+    constexpr uint16_t RED = 0xF800;
+    constexpr uint16_t GREEN = 0x07E0;
+    constexpr uint16_t WHITE = 0xFFFF;
+}
+
 static MediaApplication* g_app_instance = nullptr;
 
 static void gpio_irq_handler(uint gpio, uint32_t events) {
@@ -15,7 +24,16 @@ static void gpio_irq_handler(uint gpio, uint32_t events) {
 }
 
 MediaApplication::MediaApplication() : 
-    m_encoder(pio1, ENCODER_PIN_A)
+    m_encoder(pio1, ENCODER_PIN_A),
+    m_display(
+        pio1, // Use the same PIO block as the encoder, but a different SM
+        DISPLAY_PIN_DIN,
+        DISPLAY_PIN_CLK,
+        DISPLAY_PIN_CS,
+        DISPLAY_PIN_DC,
+        DISPLAY_PIN_RESET,
+        DISPLAY_PIN_BL
+    )
 {
     g_app_instance = this;
 
@@ -39,6 +57,8 @@ MediaApplication::MediaApplication() :
     gpio_set_dir(ENCODER_PIN_KEY, GPIO_IN);
     gpio_pull_up(ENCODER_PIN_KEY);
     gpio_set_irq_enabled_with_callback(ENCODER_PIN_KEY, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
+
+    m_display.fillScreen(Colors::BLUE);
 }
 
 void MediaApplication::run() {
