@@ -17,12 +17,13 @@ constexpr int DEBOUNCE_DELAY_MS = 100;
 // Most encoders are 4 counts per physical click.
 constexpr int ENCODER_COUNTS_PER_STEP = 4;
 
-// --- Display pins ---
-constexpr uint DISPLAY_PIN_DIN   = 0;  // SDA
-constexpr uint DISPLAY_PIN_CLK   = 1;  // SCL
-constexpr uint DISPLAY_PIN_CS    = 2;  // CS
-constexpr uint DISPLAY_PIN_DC    = 3;  // RS (DC)
-constexpr uint DISPLAY_PIN_RESET = 4;  // RESET
-constexpr uint DISPLAY_PIN_BL    = 5;  // Backlight Enable
+// --- Display pins for GMT020-02 in a clean, sequential order ---
+// Wire your display according to this block
+constexpr uint DISPLAY_PIN_CS    = 16;  // Chip Select
+constexpr uint DISPLAY_PIN_SCL   = 17;  // Serial Clock
+constexpr uint DISPLAY_PIN_SDA   = 18;  // Serial Data (DIN)
+constexpr uint DISPLAY_PIN_DC    = 19;  // Data/Command (RS)
+constexpr uint DISPLAY_PIN_RESET = 20;  // Reset
+// The BL (Backlight) pin is not used for this display
 
 #endif // CONFIG_H

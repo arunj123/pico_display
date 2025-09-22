@@ -27,12 +27,12 @@ MediaApplication::MediaApplication() :
     m_encoder(pio1, ENCODER_PIN_A),
     m_display(
         pio1, // Use the same PIO block as the encoder, but a different SM
-        DISPLAY_PIN_DIN,
-        DISPLAY_PIN_CLK,
+        DISPLAY_PIN_SDA,
+        DISPLAY_PIN_SCL,
         DISPLAY_PIN_CS,
         DISPLAY_PIN_DC,
         DISPLAY_PIN_RESET,
-        DISPLAY_PIN_BL
+        DisplayOrientation::PORTRAIT // Default to the display's native orientation
     )
 {
     g_app_instance = this;
