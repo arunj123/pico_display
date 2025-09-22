@@ -19,25 +19,22 @@ MediaApplication::MediaApplication() :
 {
     g_app_instance = this;
 
-    // --- Update timer context setup ---
+    // --- Simplified timer setup ---
     m_polling_timer.context = this;
-    m_encoder_release_timer.context = this;
-    m_button_release_timer.context = this;
+    m_release_timer.context = this;
     m_battery_timer.context = this;
-
+    
     m_processed_rotation = m_encoder.get_rotation();
 
-    // --- Update timer handler setup ---
-    // The same release handler function can be used for both timers
-    btstack_run_loop_set_timer_handler(&m_encoder_release_timer, &MediaApplication::release_handler_forwarder);
-    btstack_run_loop_set_timer_handler(&m_button_release_timer, &MediaApplication::release_handler_forwarder);
+    // --- Set up the single, generic release handler ---
+    btstack_run_loop_set_timer_handler(&m_release_timer, &MediaApplication::release_handler_forwarder);
     btstack_run_loop_set_timer_handler(&m_polling_timer, &MediaApplication::polling_handler_forwarder);
     btstack_run_loop_set_timer_handler(&m_battery_timer, &MediaApplication::battery_timer_handler_forwarder);
     
     // Register the media controller with the BTstack manager
     BtStackManager::getInstance().registerHandler(&m_media_controller);
 
-    // -- Set up the button GPIO ---
+    // --- Set up interrupt for FALLING EDGE ONLY ---
     gpio_init(ENCODER_PIN_KEY);
     gpio_set_dir(ENCODER_PIN_KEY, GPIO_IN);
     gpio_pull_up(ENCODER_PIN_KEY);
@@ -65,15 +62,14 @@ void MediaApplication::handle_gpio_irq(uint gpio, uint32_t events) {
     
     uint32_t current_time_ms = to_ms_since_boot(get_absolute_time());
 
-    // Check if enough time has passed since the last valid press
+    // Pure time-based lockout.
     if ((current_time_ms - m_last_press_time_ms) > DEBOUNCE_DELAY_MS) {
-        // If yes, this is a new, valid press.
-        // Update the timestamp to start a new lockout period.
+        // Update the timestamp to start the lockout period.
         m_last_press_time_ms = current_time_ms;
-        // Set the flag for the main loop to process.
+        // Set the flag for the main loop.
         m_button_pressed_flag = true;
     }
-    // If not enough time has passed, do nothing. This ignores all bounces.
+    // Any other interrupt within the DEBOUNCE_DELAY_MS is ignored.
 }
 
 // --- Static Forwarders to bridge C-style callbacks to C++ methods ---
@@ -86,9 +82,7 @@ void MediaApplication::polling_handler_forwarder(btstack_timer_source_t* ts) {
 
 void MediaApplication::release_handler_forwarder(btstack_timer_source_t* ts) {
     MediaApplication* app = static_cast<MediaApplication*>(ts->context);
-    if (app) {
-        app->release_handler();
-    }
+    if (app) app->release_handler();
 }
 
 void MediaApplication::battery_timer_handler_forwarder(btstack_timer_source_t* ts) {
@@ -99,6 +93,7 @@ void MediaApplication::battery_timer_handler_forwarder(btstack_timer_source_t* t
 }
 
 // --- Member Function Implementations ---
+// --- Polling Handler ---
 void MediaApplication::polling_handler() {
     if (m_media_controller.isConnected()) {
         int current_rotation = m_encoder.get_rotation();
@@ -107,15 +102,15 @@ void MediaApplication::polling_handler() {
         if (delta >= ENCODER_COUNTS_PER_STEP) {
             printf("Volume Up (Target: %d, Processed: %d)\n", current_rotation, m_processed_rotation);
             m_media_controller.increaseVolume();
-            btstack_run_loop_set_timer(&m_encoder_release_timer, RELEASE_DELAY_MS);
-            btstack_run_loop_add_timer(&m_encoder_release_timer);
+            btstack_run_loop_set_timer(&m_release_timer, RELEASE_DELAY_MS);
+            btstack_run_loop_add_timer(&m_release_timer);
             m_processed_rotation += ENCODER_COUNTS_PER_STEP;
         } 
         else if (delta <= -ENCODER_COUNTS_PER_STEP) {
             printf("Volume Down (Target: %d, Processed: %d)\n", current_rotation, m_processed_rotation);
             m_media_controller.decreaseVolume();
-            btstack_run_loop_set_timer(&m_encoder_release_timer, RELEASE_DELAY_MS);
-            btstack_run_loop_add_timer(&m_encoder_release_timer);
+            btstack_run_loop_set_timer(&m_release_timer, RELEASE_DELAY_MS);
+            btstack_run_loop_add_timer(&m_release_timer);
             m_processed_rotation -= ENCODER_COUNTS_PER_STEP;
         }
 
@@ -123,8 +118,8 @@ void MediaApplication::polling_handler() {
             m_button_pressed_flag = false;
             printf("Mute button pressed\n");
             m_media_controller.mute();
-            btstack_run_loop_set_timer(&m_button_release_timer, RELEASE_DELAY_MS);
-            btstack_run_loop_add_timer(&m_button_release_timer);
+            btstack_run_loop_set_timer(&m_release_timer, RELEASE_DELAY_MS);
+            btstack_run_loop_add_timer(&m_release_timer);
         }
     }
 
@@ -133,6 +128,7 @@ void MediaApplication::polling_handler() {
     btstack_run_loop_add_timer(&m_polling_timer);
 }
 
+// --- Single, generic release handler ---
 void MediaApplication::release_handler() {
     if (m_media_controller.isConnected()) {
         m_media_controller.release();
