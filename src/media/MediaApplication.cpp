@@ -5,6 +5,8 @@
 #include "config.h"
 #include <cstdio>
 #include "hardware/gpio.h"
+#include "font_freesans_16.h" // generated font
+#include "CustomFont.h"
 
 // Color definitions for convenience
 namespace Colors {
@@ -33,7 +35,7 @@ MediaApplication::MediaApplication() :
         DISPLAY_PIN_DC,
         DISPLAY_PIN_RESET,
         DisplayOrientation::PORTRAIT // Default to the display's native orientation
-    )
+    ), m_drawing(m_display)
 {
     g_app_instance = this;
 
@@ -58,7 +60,14 @@ MediaApplication::MediaApplication() :
     gpio_pull_up(ENCODER_PIN_KEY);
     gpio_set_irq_enabled_with_callback(ENCODER_PIN_KEY, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
 
-    m_display.fillScreen(Colors::BLUE);
+    m_display.fillScreen(Colors::BLACK);
+
+    m_drawing.fillRect(10, 10, m_drawing.getWidth() - 20, 30, Colors::RED);
+    m_drawing.drawRect(9, 9, m_drawing.getWidth() - 18, 32, Colors::WHITE);
+    
+    m_drawing.drawString(20, 20, "Hello, Display!", Colors::WHITE, &font_freesans_16);
+    
+    m_drawing.drawLine(20, 50, 300, 50, Colors::GREEN);
 }
 
 void MediaApplication::run() {

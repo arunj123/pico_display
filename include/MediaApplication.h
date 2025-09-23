@@ -7,6 +7,7 @@
 #include "RotaryEncoder.h"
 #include "btstack.h"
 #include "Display.h"
+#include "Drawing.h"
 
 class MediaApplication {
 public:
@@ -40,6 +41,7 @@ private:
     uint32_t m_last_press_time_ms = 0;
 
     St7789Display m_display;
+    Drawing m_drawing;
 };
 
 #endif // MEDIA_APPLICATION_H

@@ -83,6 +83,7 @@ add_executable(${MEDIA_TARGET_NAME}
     src/media/MediaApplication.cpp
     src/pico/RotaryEncoder.cpp
     src/display/Display.cpp
+    src/display/Drawing.cpp
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/hids_device.c
     # Common sources
     ${COMMON_SOURCES}
