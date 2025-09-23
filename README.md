@@ -26,11 +26,11 @@ Wire board as follows before flashing:
 
 | GMT020-02 Pin | Function | Your GPIO Pin | Pico Pin Name |
 | :--- | :--- | :--- | :--- |
-| **CS** | Chip Select | **16** | GP16 |
-| **SCL** | Serial Clock | **17** | GP17 |
-| **SDA** | Serial Data | **18** | GP18 |
+| **CS** | Chip Select | **20** | GP20 |
+| **SCL** | Serial Clock | **16** | GP16 |
+| **SDA** | Serial Data | **17** | GP17 |
 | **DC** / **RS** | Data/Command | **19** | GP19 |
-| **RST** | Reset | **20** | GP20 |
+| **RST** | Reset | **18** | GP18 |
 | **VCC** | Power (3.3V) | - | 3V3(OUT) |
 | **GND** | Ground | - | GND |
 | **LED+** / **LED-** | Backlight Power | - | (e.g., to 3V3 and GND) |

@@ -19,11 +19,11 @@ constexpr int ENCODER_COUNTS_PER_STEP = 4;
 
 // --- Display pins for GMT020-02 in a clean, sequential order ---
 // Wire your display according to this block
-constexpr uint DISPLAY_PIN_CS    = 16;  // Chip Select
-constexpr uint DISPLAY_PIN_SCL   = 17;  // Serial Clock
-constexpr uint DISPLAY_PIN_SDA   = 18;  // Serial Data (DIN)
+constexpr uint DISPLAY_PIN_CS    = 20;  // Chip Select
+constexpr uint DISPLAY_PIN_SCL   = 16;  // Serial Clock
+constexpr uint DISPLAY_PIN_SDA   = 17;  // Serial Data (DIN)
 constexpr uint DISPLAY_PIN_DC    = 19;  // Data/Command (RS)
-constexpr uint DISPLAY_PIN_RESET = 20;  // Reset
+constexpr uint DISPLAY_PIN_RESET = 18;  // Reset
 // The BL (Backlight) pin is not used for this display
 
 #endif // CONFIG_H
