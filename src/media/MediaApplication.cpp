@@ -7,6 +7,7 @@
 #include "hardware/gpio.h"
 #include "font_freesans_16.h" // generated font
 #include "CustomFont.h"
+#include "test_img.h"
 
 // Color definitions for convenience
 namespace Colors {
@@ -65,6 +66,14 @@ MediaApplication::MediaApplication() :
     m_drawing.fillRect(10, 10, m_drawing.getWidth() - 20, 30, Colors::RED);
     m_drawing.drawRect(9, 9, m_drawing.getWidth() - 18, 32, Colors::WHITE);
     
+    m_drawing.drawImage(
+        (m_drawing.getWidth() - test_img_width) / 2, // Center horizontally
+        (m_drawing.getHeight() - test_img_height) / 2, // Center vertically
+        test_img_width,
+        test_img_height,
+        test_img_data
+    );
+
     m_drawing.drawString(20, 20, "Hello, Display!", Colors::WHITE, &font_freesans_16);
     
     m_drawing.drawLine(20, 50, 300, 50, Colors::GREEN);

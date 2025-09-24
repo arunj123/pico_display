@@ -20,6 +20,9 @@ public:
     void drawChar(uint16_t x, uint16_t y, char c, uint16_t color, const custom_font_t* font);
     void drawString(uint16_t x, uint16_t y, const char* str, uint16_t color, const custom_font_t* font);
 
+    // Image
+    void drawImage(uint16_t x, uint16_t y, uint16_t width, uint16_t height, const uint16_t* image_data);
+
     // Getters
     uint16_t getWidth() const { return m_display.getWidth(); }
     uint16_t getHeight() const { return m_display.getHeight(); }

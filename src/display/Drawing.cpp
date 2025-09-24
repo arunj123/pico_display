@@ -97,3 +97,12 @@ void Drawing::drawString(uint16_t x, uint16_t y, const char* str, uint16_t color
         current_x += char_width + 1;
     }
 }
+
+void Drawing::drawImage(uint16_t x, uint16_t y, uint16_t width, uint16_t height, const uint16_t* image_data) {
+    // Check bounds
+    if (x >= m_display.getWidth() || y >= m_display.getHeight()) {
+        return;
+    }
+    // Simple wrapper around the low-level buffer drawing function
+    m_display.drawBuffer(x, y, width, height, image_data);
+}
