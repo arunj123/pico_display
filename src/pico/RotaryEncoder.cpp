@@ -2,70 +2,85 @@
 
 #include "RotaryEncoder.h"
 #include "hardware/gpio.h"
-#include <cstdio>
+#include "hardware/sync.h"
+#include "pico/time.h"
+#include "config.h"
 
-// The state table for the rotary encoder logic, as inspired by your sample.
-// (State << 2) | Current gives an index into this table.
-static const int8_t state_table[] = {
-  0, -1,  1,  0,  // State 00 -> 00, 01, 10, 11
-  1,  0,  0, -1,  // State 01 -> 00, 01, 10, 11
- -1,  0,  0,  1,  // State 10 -> 00, 01, 10, 11
-  0,  1, -1,  0   // State 11 -> 00, 01, 10, 11
-};
+// A static pointer to the single instance of the encoder.
+// This is necessary for the C-style ISR to call the C++ method.
+static RotaryEncoder* g_encoder_instance = nullptr;
 
-RotaryEncoder::RotaryEncoder(uint pin_A, uint pin_B) :
-    m_pin_A(pin_A), m_pin_B(pin_B), m_rotation(0) 
+RotaryEncoder::RotaryEncoder(uint pin_A, uint pin_B, uint pin_Key) :
+    m_pin_A(pin_A), m_pin_B(pin_B), m_pin_Key(pin_Key)
 {
-    // Initialize the critical section for thread/IRQ safety
+    assert(!g_encoder_instance);
+    g_encoder_instance = this;
+
     critical_section_init(&m_crit_sec);
 
-    // Initialize GPIOs for input with pull-ups
+    // --- Init GPIOs ---
     gpio_init(m_pin_A);
     gpio_set_dir(m_pin_A, GPIO_IN);
     gpio_pull_up(m_pin_A);
-    
+
     gpio_init(m_pin_B);
     gpio_set_dir(m_pin_B, GPIO_IN);
     gpio_pull_up(m_pin_B);
 
-    // Initialize the starting state
-    m_last_state = (gpio_get(m_pin_A) << 1) | gpio_get(m_pin_B);
+    gpio_init(m_pin_Key);
+    gpio_set_dir(m_pin_Key, GPIO_IN);
+    gpio_pull_up(m_pin_Key);
+
+    // --- Init Interrupts ---
+    // The shared handler will be called for any of these pins.
+    // Trigger rotation ISR on the falling edge of Pin A.
+    // Trigger key ISR on the falling edge of the Key pin.
+    gpio_set_irq_enabled_with_callback(
+        m_pin_A, GPIO_IRQ_EDGE_FALL, true, &RotaryEncoder::gpio_irq_handler);
+        
+    gpio_set_irq_enabled(
+        m_pin_Key, GPIO_IRQ_EDGE_FALL, true);
 }
 
-void RotaryEncoder::process_state_change() {
-    // Read the current state of the pins
-    uint8_t current_A = gpio_get(m_pin_A);
-    uint8_t current_B = gpio_get(m_pin_B);
-    uint8_t current_state = (current_A << 1) | current_B;
+// Static C-style ISR that forwards to the C++ class instance
+void RotaryEncoder::gpio_irq_handler(uint gpio, uint32_t events) {
+    if (g_encoder_instance) {
+        if (gpio == g_encoder_instance->m_pin_A) {
+            g_encoder_instance->_rotation_isr();
+        } else if (gpio == g_encoder_instance->m_pin_Key) {
+            g_encoder_instance->_key_isr();
+        }
+    }
+}
 
-    // If the state hasn't changed, do nothing (debounce)
-    if (current_state == m_last_state) {
+void RotaryEncoder::_key_isr() {
+    m_key_event_occurred = true;
+}
+
+void RotaryEncoder::_rotation_isr() {
+    uint64_t now_us = time_us_64();
+    if ((now_us - m_last_rotation_interrupt_time_us) < (DEBOUNCE_DELAY_MS_ROTATION * 1000)) {
         return;
     }
-    
-    // Look up the transition in the state table
-    int8_t change = state_table[(m_last_state << 2) | current_state];
-    
-    if (change != 0) {
-        // We use a critical section to safely modify the rotation count
-        critical_section_enter_blocking(&m_crit_sec);
-        m_rotation += change;
-        critical_section_exit(&m_crit_sec);
-    }
-    
-    // Update the last state
-    m_last_state = current_state;
+    critical_section_enter_blocking(&m_crit_sec);
+    if (gpio_get(m_pin_B) == 0) m_rotation_count--;
+    else m_rotation_count++;
+    critical_section_exit(&m_crit_sec);
+    m_last_rotation_interrupt_time_us = now_us;
 }
 
-void RotaryEncoder::set_rotation(int _rotation) {
+bool RotaryEncoder::read_and_clear_raw_press_event() {
     critical_section_enter_blocking(&m_crit_sec);
-    m_rotation = _rotation;
+    bool pressed = m_key_event_occurred;
+    m_key_event_occurred = false;
     critical_section_exit(&m_crit_sec);
+    return pressed;
 }
 
-int RotaryEncoder::get_rotation(void) {
+int8_t RotaryEncoder::read_and_clear_rotation() {
     critical_section_enter_blocking(&m_crit_sec);
-    int value = m_rotation;
+    int8_t count = m_rotation_count;
+    m_rotation_count = 0;
     critical_section_exit(&m_crit_sec);
-    return value;
+    return count;
 }

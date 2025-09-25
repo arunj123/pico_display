@@ -13,7 +13,6 @@ class MediaApplication {
 public:
     MediaApplication();
     void run();
-    void handle_gpio_irq(uint gpio, uint32_t events);
 
 private:
     // We only need ONE generic release handler
@@ -36,9 +35,10 @@ private:
     int m_processed_rotation = 0;
     uint8_t m_battery_level = 100;
 
-    // --- We only need these two for debouncing ---
-    volatile bool m_button_pressed_flag = false;
-    uint32_t m_last_press_time_ms = 0;
+    // --- State variables for button debouncing ---
+    enum class ButtonState { IDLE, ARMED, PRESSED };
+    ButtonState m_button_state = ButtonState::IDLE;
+    uint64_t m_button_armed_time_us = 0;
 
     St7789Display m_display;
     Drawing m_drawing;
