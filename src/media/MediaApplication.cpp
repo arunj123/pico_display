@@ -27,9 +27,10 @@ static void gpio_irq_handler(uint gpio, uint32_t events) {
 }
 
 MediaApplication::MediaApplication() : 
-    m_encoder(pio1, ENCODER_PIN_A),
+    // Update constructor to pass pin numbers instead of PIO instance
+    m_encoder(ENCODER_PIN_A, ENCODER_PIN_B),
     m_display(
-        pio1, // Use the same PIO block as the encoder, but a different SM
+        pio1,
         DISPLAY_PIN_SDA,
         DISPLAY_PIN_SCL,
         DISPLAY_PIN_CS,
@@ -55,11 +56,22 @@ MediaApplication::MediaApplication() :
     // Register the media controller with the BTstack manager
     BtStackManager::getInstance().registerHandler(&m_media_controller);
 
-    // --- Set up interrupt for FALLING EDGE ONLY ---
+    // --- UPDATED INTERRUPT SETUP ---
+    // Button setup remains the same
     gpio_init(ENCODER_PIN_KEY);
     gpio_set_dir(ENCODER_PIN_KEY, GPIO_IN);
     gpio_pull_up(ENCODER_PIN_KEY);
-    gpio_set_irq_enabled_with_callback(ENCODER_PIN_KEY, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
+    
+    // Enable interrupts for the button on falling edge
+    gpio_set_irq_enabled(ENCODER_PIN_KEY, GPIO_IRQ_EDGE_FALL, true);
+
+    // Enable interrupts for encoder pins A and B on both edges
+    gpio_set_irq_enabled(ENCODER_PIN_A, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true);
+    gpio_set_irq_enabled(ENCODER_PIN_B, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true);
+    
+    // Set the single shared callback function
+    gpio_set_irq_callback(&gpio_irq_handler);
+    irq_set_enabled(IO_IRQ_BANK0, true); // Enable interrupts on BANK0
 
     m_display.fillScreen(Colors::BLACK);
 
@@ -96,18 +108,17 @@ void MediaApplication::run() {
 }
 
 void MediaApplication::handle_gpio_irq(uint gpio, uint32_t events) {
-    if (gpio != ENCODER_PIN_KEY) return;
-    
-    uint32_t current_time_ms = to_ms_since_boot(get_absolute_time());
-
-    // Pure time-based lockout.
-    if ((current_time_ms - m_last_press_time_ms) > DEBOUNCE_DELAY_MS) {
-        // Update the timestamp to start the lockout period.
-        m_last_press_time_ms = current_time_ms;
-        // Set the flag for the main loop.
-        m_button_pressed_flag = true;
+    if (gpio == ENCODER_PIN_KEY && (events & GPIO_IRQ_EDGE_FALL)) {
+        // Handle button press with debouncing
+        uint32_t current_time_ms = to_ms_since_boot(get_absolute_time());
+        if ((current_time_ms - m_last_press_time_ms) > DEBOUNCE_DELAY_MS) {
+            m_last_press_time_ms = current_time_ms;
+            m_button_pressed_flag = true;
+        }
+    } else if (gpio == ENCODER_PIN_A || gpio == ENCODER_PIN_B) {
+        // Handle encoder rotation
+        m_encoder.process_state_change();
     }
-    // Any other interrupt within the DEBOUNCE_DELAY_MS is ignored.
 }
 
 // --- Static Forwarders to bridge C-style callbacks to C++ methods ---

@@ -1,89 +1,71 @@
-// File: RotaryEncoder.cpp
+// File: src/pico/RotaryEncoder.cpp
 
 #include "RotaryEncoder.h"
-// We no longer need irq.h for this, pico/sync.h is sufficient
-#include "pio_rotary_encoder.pio.h"
+#include "hardware/gpio.h"
+#include <cstdio>
 
-// --- Static members and handlers ---
-static RotaryEncoder* p_encoder_instance[NUM_PIOS] = {nullptr, nullptr};
+// The state table for the rotary encoder logic, as inspired by your sample.
+// (State << 2) | Current gives an index into this table.
+static const int8_t state_table[] = {
+  0, -1,  1,  0,  // State 00 -> 00, 01, 10, 11
+  1,  0,  0, -1,  // State 01 -> 00, 01, 10, 11
+ -1,  0,  0,  1,  // State 10 -> 00, 01, 10, 11
+  0,  1, -1,  0   // State 11 -> 00, 01, 10, 11
+};
 
-static void pio0_irq_handler() {
-    if (p_encoder_instance[0]) {
-        p_encoder_instance[0]->isr();
-    }
-}
-
-static void pio1_irq_handler() {
-    if (p_encoder_instance[1]) {
-        p_encoder_instance[1]->isr();
-    }
-}
-
-// --- Class Implementation ---
-RotaryEncoder::RotaryEncoder(PIO pio_instance, uint rotary_encoder_A) :
-    pio(pio_instance),
-    rotation(0)
+RotaryEncoder::RotaryEncoder(uint pin_A, uint pin_B) :
+    m_pin_A(pin_A), m_pin_B(pin_B), m_rotation(0) 
 {
-    // --- Initialize the spin lock ---
-    uint lock_num = spin_lock_claim_unused(true);
-    lock = spin_lock_init(lock_num);
+    // Initialize the critical section for thread/IRQ safety
+    critical_section_init(&m_crit_sec);
 
-    // --- The rest of the setup is the same ---
-    uint pio_idx = pio_get_index(pio);
-    assert(pio_idx < NUM_PIOS);
-    assert(!p_encoder_instance[pio_idx]);
-    p_encoder_instance[pio_idx] = this;
-
-    uint8_t rotary_encoder_B = rotary_encoder_A + 1;
-    sm = pio_claim_unused_sm(pio, true);
-
-    pio_gpio_init(pio, rotary_encoder_A);
-    gpio_set_pulls(rotary_encoder_A, true, false);
-    pio_gpio_init(pio, rotary_encoder_B);
-    gpio_set_pulls(rotary_encoder_B, true, false);
-
-    uint offset = pio_add_program(pio, &pio_rotary_encoder_program);
-    pio_sm_config c = pio_rotary_encoder_program_get_default_config(offset);
-    sm_config_set_in_pins(&c, rotary_encoder_A);
-    sm_config_set_in_shift(&c, false, false, 0);
-
-    // Note: We need the real hardware/irq.h for this part
-    #include "hardware/irq.h"
-    uint pio_irq = (pio == pio0) ? PIO0_IRQ_0 : PIO1_IRQ_0;
-    irq_set_exclusive_handler(pio_irq, (pio == pio0) ? pio0_irq_handler : pio1_irq_handler);
-    irq_set_enabled(pio_irq, true);
+    // Initialize GPIOs for input with pull-ups
+    gpio_init(m_pin_A);
+    gpio_set_dir(m_pin_A, GPIO_IN);
+    gpio_pull_up(m_pin_A);
     
-    pio_interrupt_clear(pio, 0);
-    pio_interrupt_clear(pio, 1);
-    pio_set_irq0_source_enabled(pio, pis_interrupt0, true);
-    pio_set_irq0_source_enabled(pio, pis_interrupt1, true);
+    gpio_init(m_pin_B);
+    gpio_set_dir(m_pin_B, GPIO_IN);
+    gpio_pull_up(m_pin_B);
 
-    pio_sm_init(pio, sm, offset + 16, &c); 
-    pio_sm_set_enabled(pio, sm, true);
+    // Initialize the starting state
+    m_last_state = (gpio_get(m_pin_A) << 1) | gpio_get(m_pin_B);
+}
+
+void RotaryEncoder::process_state_change() {
+    // Read the current state of the pins
+    uint8_t current_A = gpio_get(m_pin_A);
+    uint8_t current_B = gpio_get(m_pin_B);
+    uint8_t current_state = (current_A << 1) | current_B;
+
+    // If the state hasn't changed, do nothing (debounce)
+    if (current_state == m_last_state) {
+        return;
+    }
+    
+    // Look up the transition in the state table
+    int8_t change = state_table[(m_last_state << 2) | current_state];
+    
+    if (change != 0) {
+        // We use a critical section to safely modify the rotation count
+        critical_section_enter_blocking(&m_crit_sec);
+        m_rotation += change;
+        critical_section_exit(&m_crit_sec);
+    }
+    
+    // Update the last state
+    m_last_state = current_state;
 }
 
 void RotaryEncoder::set_rotation(int _rotation) {
-    // --- Use the spin lock to protect the write ---
-    uint32_t irq_status = spin_lock_blocking(lock);
-    rotation = _rotation;
-    spin_unlock(lock, irq_status);
+    critical_section_enter_blocking(&m_crit_sec);
+    m_rotation = _rotation;
+    critical_section_exit(&m_crit_sec);
 }
 
 int RotaryEncoder::get_rotation(void) {
-    // --- Use the spin lock to protect the read ---
-    uint32_t irq_status = spin_lock_blocking(lock);
-    int value = rotation;
-    spin_unlock(lock, irq_status);
+    critical_section_enter_blocking(&m_crit_sec);
+    int value = m_rotation;
+    critical_section_exit(&m_crit_sec);
     return value;
-}
-
-void RotaryEncoder::isr() {
-    if (pio_interrupt_get(pio, 0)) {
-        pio_interrupt_clear(pio, 0);
-        rotation++; // Clockwise
-    }
-    if (pio_interrupt_get(pio, 1)) {
-        pio_interrupt_clear(pio, 1);
-        rotation--; // Counter-Clockwise
-    }
 }

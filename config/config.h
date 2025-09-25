@@ -7,6 +7,7 @@
 
 // --- Hardware Pins ---
 constexpr uint ENCODER_PIN_A = 10;
+constexpr uint ENCODER_PIN_B = 11;
 constexpr uint ENCODER_PIN_KEY = 12;
 
 // --- Application Behavior ---
