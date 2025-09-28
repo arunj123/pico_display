@@ -1,0 +1,23 @@
+// File: src/media/file_transfer_service.gatt
+//
+// A custom BLE service for transferring larger data blobs like images or text.
+// It uses a simple protocol with a control point and separate data channels.
+//
+// Service UUID: 0000FF50-0000-1000-8000-00805F9B34FB
+
+PRIMARY_SERVICE, 0000FF50-0000-1000-8000-00805F9B34FB
+
+// --- Characteristics ---
+
+// 1. TX Data (Pico -> PC)
+// The PC subscribes to this characteristic to receive data from the Pico.
+CHARACTERISTIC, 0000FF51-0000-1000-8000-00805F9B34FB, NOTIFY | DYNAMIC,
+
+// 2. RX Data (PC -> Pico)
+// The PC writes data chunks to this characteristic to send data to the Pico.
+// WRITE_WITHOUT_RESPONSE is faster, but WRITE provides flow control. We use WRITE for robustness.
+CHARACTERISTIC, 0000FF52-0000-1000-8000-00805F9B34FB, WRITE | DYNAMIC,
+
+// 3. Control Point (Bidirectional Commands/Status)
+// Used to initiate, end, and acknowledge transfers.
+CHARACTERISTIC, 0000FF53-0000-1000-8000-00805F9B34FB, WRITE | NOTIFY | DYNAMIC,

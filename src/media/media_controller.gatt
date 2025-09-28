@@ -12,5 +12,7 @@ CHARACTERISTIC, GAP_DEVICE_NAME, READ, "Pico Media Controller"
 // add HID Service
 #import <hids.gatt>
 
+#import "file_transfer_service.gatt"
+
 PRIMARY_SERVICE, GATT_SERVICE
 CHARACTERISTIC, GATT_DATABASE_HASH, READ,

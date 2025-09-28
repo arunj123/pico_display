@@ -1,40 +1,39 @@
-// File: MediaApplication.cpp
+// File: src/media/MediaApplication.cpp
 
 #include "MediaApplication.h"
 #include "BtStackManager.h"
 #include "config.h"
 #include "pico/time.h" // For time_us_64
-#include <cstdio>
 #include "hardware/gpio.h"
 #include "font_freesans_16.h" // generated font
-#include "CustomFont.h"
 #include "test_img.h"
+#include <cstdio>
 
-// Color definitions for convenience
+// Define the global instance pointer that other files can see
+MediaApplication* g_app_instance = nullptr;
+
 namespace Colors {
     constexpr uint16_t BLACK = 0x0000;
-    constexpr uint16_t BLUE = 0x001F;
-    constexpr uint16_t RED = 0xF800;
-    constexpr uint16_t GREEN = 0x07E0;
+    constexpr uint16_t RED   = 0xF800;
     constexpr uint16_t WHITE = 0xFFFF;
+    constexpr uint16_t GREEN = 0x07E0;
 }
 
-MediaApplication::MediaApplication() : 
-    // FIX 1: Call the correct constructor with all three pins.
+MediaApplication::MediaApplication() :
     m_encoder(ENCODER_PIN_A, ENCODER_PIN_B, ENCODER_PIN_KEY),
     m_display(
-        pio1,
+        pio0,
         DISPLAY_PIN_SDA,
         DISPLAY_PIN_SCL,
         DISPLAY_PIN_CS,
         DISPLAY_PIN_DC,
         DISPLAY_PIN_RESET,
         DisplayOrientation::PORTRAIT
-    ), m_drawing(m_display)
+    ),
+    m_drawing(m_display)
 {
-    // FIX 2: Remove all GPIO and IRQ setup logic from this class.
-    // The RotaryEncoder's constructor now handles this automatically.
-    
+    g_app_instance = this;
+
     m_polling_timer.context = this;
     m_release_timer.context = this;
     m_battery_timer.context = this;
@@ -75,26 +74,18 @@ void MediaApplication::run() {
     btstack_run_loop_execute();
 }
 
-
-
 // --- Static Forwarders to bridge C-style callbacks to C++ methods ---
 void MediaApplication::polling_handler_forwarder(btstack_timer_source_t* ts) {
-    MediaApplication* app = static_cast<MediaApplication*>(ts->context);
-    if (app) {
-        app->polling_handler();
-    }
+    auto* app = static_cast<MediaApplication*>(ts->context);
+    app->polling_handler();
 }
-
 void MediaApplication::release_handler_forwarder(btstack_timer_source_t* ts) {
-    MediaApplication* app = static_cast<MediaApplication*>(ts->context);
-    if (app) app->release_handler();
+    auto* app = static_cast<MediaApplication*>(ts->context);
+    app->release_handler();
 }
-
 void MediaApplication::battery_timer_handler_forwarder(btstack_timer_source_t* ts) {
-    MediaApplication* app = static_cast<MediaApplication*>(ts->context);
-    if (app) {
-        app->battery_timer_handler();
-    }
+    auto* app = static_cast<MediaApplication*>(ts->context);
+    app->battery_timer_handler();
 }
 
 // --- Member Function Implementations ---
@@ -102,7 +93,7 @@ void MediaApplication::battery_timer_handler_forwarder(btstack_timer_source_t* t
 void MediaApplication::polling_handler() {
     if (m_media_controller.isConnected()) {
 
-        // --- Handle Rotation (Unchanged) ---
+        // --- Handle Rotation ---
         int8_t rotation_delta = m_encoder.read_and_clear_rotation();
         if (rotation_delta > 0) {
             printf("Volume Up\n");
@@ -128,7 +119,6 @@ void MediaApplication::polling_handler() {
                     m_button_state = ButtonState::ARMED;
                 }
                 break;
-            
             case ButtonState::ARMED:
                 if (!is_key_down) {
                     // Button was released before debounce time, it was a glitch. Reset.
@@ -144,7 +134,6 @@ void MediaApplication::polling_handler() {
                     m_button_state = ButtonState::PRESSED;
                 }
                 break;
-            
             case ButtonState::PRESSED:
                 if (!is_key_down) {
                     // Button has been released. Reset for the next press.
@@ -168,9 +157,7 @@ void MediaApplication::release_handler() {
 }
 
 void MediaApplication::battery_timer_handler() {
-    if (m_battery_level > 0) {
-        m_battery_level--;
-    }
+    if (m_battery_level > 0) m_battery_level--;
 
     printf("Updating battery level to %d%%\n", m_battery_level);
     

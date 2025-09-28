@@ -38,7 +38,6 @@ protected:
     void onReadyToSend_impl() override;
 
 private:
-    // ... State management for file transfer (unchanged) ...
     enum class TransferState { IDLE, RECEIVING, SENDING };
     TransferState m_transfer_state = TransferState::IDLE;
     std::vector<uint8_t> m_rx_buffer;
@@ -50,4 +49,4 @@ private:
     uint32_t m_tx_offset = 0;
 };
 
-#endif // MEDIA_CONTROLLER_DEVICE_H
+#endif

@@ -1,4 +1,9 @@
+# In your main CMakeLists.txt
+
 cmake_minimum_required(VERSION 3.13)
+
+# Find Python3 Interpreter
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 # == DO NOT EDIT THE FOLLOWING LINES for the Raspberry Pi Pico VS Code Extension to work ==
 if(WIN32)
@@ -17,14 +22,17 @@ endif()
 set(PICO_BOARD pico_w CACHE STRING "Board type")
 
 include(src/pico/pico_sdk_import.cmake)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(GattUtils)
 
 project(pico_hid_devices C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
+# Initialize the SDK
 pico_sdk_init()
 
-# --- Common sources shared by all targets ---
+# --- Common sources and libraries; shared by all targets ---
 set(COMMON_SOURCES
     src/hid/HidDevice.cpp
     src/bt/BtStackManager.cpp
@@ -42,7 +50,6 @@ set(COMMON_LIBS
     pico_btstack_ble
     hardware_adc
 )
-
 
 # --- 1. Define the Keyboard Application ---
 set(KEYBOARD_TARGET_NAME keyboard_app)
@@ -63,16 +70,17 @@ pico_btstack_make_gatt_header(${KEYBOARD_TARGET_NAME} PRIVATE ${CMAKE_CURRENT_SO
 
 # Link libraries and set options
 target_link_libraries(${KEYBOARD_TARGET_NAME} PRIVATE ${COMMON_LIBS})
+
 target_include_directories(${KEYBOARD_TARGET_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/config
     ${CMAKE_CURRENT_LIST_DIR}/include
+    ${CMAKE_CURRENT_LIST_DIR}/include/ble
 )
 target_link_options(${KEYBOARD_TARGET_NAME} PRIVATE "-Wl,--defsym=__STACK_SIZE=16384")
 target_compile_definitions(${KEYBOARD_TARGET_NAME} PRIVATE PICO_STDIO_USB_CONNECT_WAIT_TIMEOUT_MS=3000 CYW43_LWIP=0)
 pico_enable_stdio_uart(${KEYBOARD_TARGET_NAME} 1)
 pico_add_extra_outputs(${KEYBOARD_TARGET_NAME})
-
 
 # --- 2. Define the Media Controller Application ---
 set(MEDIA_TARGET_NAME media_app)
@@ -85,23 +93,31 @@ add_executable(${MEDIA_TARGET_NAME}
     src/display/Display.cpp
     src/display/Drawing.cpp
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/hids_device.c
-    # Common sources
     ${COMMON_SOURCES}
 )
 
-# Add generated headers for this target
-pico_generate_pio_header(${MEDIA_TARGET_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/display/st7789_lcd.pio)
-pico_btstack_make_gatt_header(${MEDIA_TARGET_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/media/media_controller.gatt)
+target_sources(${MEDIA_TARGET_NAME} PRIVATE 
+    src/media/file_transfer_service.gatt
+)
 
-# Link libraries and set options
+pico_generate_pio_header(${MEDIA_TARGET_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/display/st7789_lcd.pio)
+
+custom_btstack_make_gatt_header(${MEDIA_TARGET_NAME} PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/media/media_controller.gatt
+    PYTHON_EXECUTABLE ${Python3_EXECUTABLE}
+)
+
 target_link_libraries(${MEDIA_TARGET_NAME} PRIVATE 
     ${COMMON_LIBS}
     hardware_pio
 )
+
+# Add the specific generated directory and the new 'ble' directory to the media app's include path
 target_include_directories(${MEDIA_TARGET_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/config
     ${CMAKE_CURRENT_LIST_DIR}/include
+    ${CMAKE_CURRENT_LIST_DIR}/include/ble
 )
 target_link_options(${MEDIA_TARGET_NAME} PRIVATE "-Wl,--defsym=__STACK_SIZE=16384")
 target_compile_definitions(${MEDIA_TARGET_NAME} PRIVATE PICO_STDIO_USB_CONNECT_WAIT_TIMEOUT_MS=3000 CYW43_LWIP=0)
