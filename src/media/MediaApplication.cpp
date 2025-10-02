@@ -10,6 +10,7 @@
 #include <cstdio>
 #include "pico/cyw43_arch.h"
 #include "lwip/ip4_addr.h"
+#include "FrameProtocol.h"
 
 MediaApplication* g_app_instance = nullptr;
 
@@ -42,11 +43,37 @@ void debug_print_gpio_status(uint gpio) {
     printf("--------------------\n");
 }
 
-static void on_tcp_data_received(const std::vector<uint8_t>& data) {
-    printf("--- TCP data received! Size: %zu bytes ---\n", data.size());
-    if (g_app_instance) {
-        printf("--- Echoing data back to client... ---\n");
-        g_app_instance->getTcpServer().send_data(data);
+// --- NEW FRAME-BASED CALLBACK ---
+void on_frame_received(const Frame& frame) {
+    if (!g_app_instance) return;
+
+    switch(frame.header.type) {
+        case THROUGHPUT_TEST:
+            printf("THROUGHPUT_TEST frame received, echoing back.\n");
+            g_app_instance->getTcpServer().send_frame(THROUGHPUT_TEST, frame.payload);
+            break;
+
+        case IMAGE_TILE:
+        {
+            // The DMA/PIO drawing is non-blocking. While the DMA is busy sending
+            // pixel data to the display, the CPU is free to return to the main loop
+            // and process the next incoming TCP packet. This creates a natural
+            // pipeline and acts as our double-buffering mechanism.
+            ImageTileHeader tile_header;
+            memcpy(&tile_header, frame.payload.data(), sizeof(ImageTileHeader));
+            
+            const uint16_t* pixel_data = reinterpret_cast<const uint16_t*>(frame.payload.data() + sizeof(ImageTileHeader));
+            
+            printf("IMAGE_TILE received: x=%u, y=%u, w=%u, h=%u\n", 
+                    tile_header.x, tile_header.y, tile_header.width, tile_header.height);
+            
+            g_app_instance->getDrawing().drawImage(tile_header.x, tile_header.y, tile_header.width, tile_header.height, pixel_data);
+            break;
+        }
+            
+        default:
+            printf("Unknown frame type received: 0x%02x\n", frame.header.type);
+            break;
     }
 }
 
@@ -70,7 +97,7 @@ MediaApplication::MediaApplication() :
     btstack_run_loop_set_timer_handler(&m_battery_timer, &MediaApplication::battery_timer_handler_forwarder);
     
     BtStackManager::getInstance().registerHandler(&m_media_controller);
-    m_tcp_server.setReceiveCallback(on_tcp_data_received);
+    m_tcp_server.setReceiveCallback(on_frame_received);
 
     // NOTE: All drawing calls have been moved out of the constructor.
 }

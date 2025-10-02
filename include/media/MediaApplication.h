@@ -12,12 +12,15 @@
 #include <vector>
 #include "pico/sync.h"
 
+void on_frame_received(const Frame& frame);
+
 class MediaApplication {
 public:
     MediaApplication();
     void run();
     TcpServer& getTcpServer() { return m_tcp_server; }
     MediaControllerDevice& getMediaController() { return m_media_controller; }
+    Drawing& getDrawing() { return m_drawing; }
 
 private:
     MediaControllerDevice m_media_controller;
