@@ -16,12 +16,12 @@ enum FrameType : uint8_t {
 };
 
 struct FrameHeader {
-    uint8_t  magic;
+    uint8_t   magic;
     FrameType type;
-    uint16_t payload_length;
+    uint16_t  payload_length;
 };
 
-// The payload for an IMAGE_TILE frame starts with this header
+// Payload for an IMAGE_TILE frame now includes a checksum
 struct ImageTileHeader {
     uint16_t x;
     uint16_t y;
