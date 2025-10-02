@@ -22,10 +22,11 @@ static const uint8_t st7789_init_seq[] = {
     0
 };
 
-// UPDATED: Constructor signature changed
+// --- THE FIX: Constructor is now lightweight ---
 St7789Display::St7789Display(PIO pio, uint pin_sda, uint pin_scl, uint pin_cs, uint pin_dc, uint pin_reset, DisplayOrientation orientation)
     : m_pio(pio), m_pin_sda(pin_sda), m_pin_scl(pin_scl), m_pin_cs(pin_cs), m_pin_dc(pin_dc), m_pin_reset(pin_reset), m_orientation(orientation)
 {
+    // It only saves variables and calculates dimensions, no hardware access.
     if (m_orientation == DisplayOrientation::LANDSCAPE) {
         m_width = PHYSICAL_HEIGHT;
         m_height = PHYSICAL_WIDTH;
@@ -33,13 +34,14 @@ St7789Display::St7789Display(PIO pio, uint pin_sda, uint pin_scl, uint pin_cs, u
         m_width = PHYSICAL_WIDTH;
         m_height = PHYSICAL_HEIGHT;
     }
+}
 
+// --- THE FIX: All hardware setup is moved to init() ---
+void St7789Display::init() {
     m_sm = pio_claim_unused_sm(m_pio, true);
     m_offset = pio_add_program(m_pio, &st7789_lcd_program);
-    // Use SDA as DIN and SCL as CLK
     st7789_lcd_program_init(m_pio, m_sm, m_offset, m_pin_sda, m_pin_scl, SERIAL_CLK_DIV);
 
-    // UPDATED: Removed backlight pin from mask
     uint32_t pin_mask = (1u << m_pin_cs) | (1u << m_pin_dc) | (1u << m_pin_reset);
     gpio_init_mask(pin_mask);
     gpio_set_dir_out_masked(pin_mask);
@@ -48,8 +50,6 @@ St7789Display::St7789Display(PIO pio, uint pin_sda, uint pin_scl, uint pin_cs, u
     gpio_put(m_pin_reset, 1);
     
     init_display();
-    
-    // No backlight GPIO to control
 }
 
 void St7789Display::init_display() {

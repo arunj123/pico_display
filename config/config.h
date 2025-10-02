@@ -5,7 +5,10 @@
 
 #include "pico/stdlib.h"
 
-// --- Hardware Pins ---
+// --- Wi-Fi Credentials ---
+// IMPORTANT: Replace with your network details
+#define WIFI_SSID "Add/Your/SSID"
+#define WIFI_PASSWORD "Password"
 constexpr uint ENCODER_PIN_A = 10;
 constexpr uint ENCODER_PIN_B = 11;
 constexpr uint ENCODER_PIN_KEY = 12;

@@ -13,8 +13,9 @@ enum class DisplayOrientation {
 
 class St7789Display {
 public:
-    // UPDATED: Constructor no longer takes a backlight pin
     St7789Display(PIO pio, uint pin_sda, uint pin_scl, uint pin_cs, uint pin_dc, uint pin_reset, DisplayOrientation orientation);
+
+    void init(); // <-- ADD THIS NEW METHOD
 
     void fillScreen(uint16_t color);
     void drawBuffer(uint16_t x, uint16_t y, uint16_t width, uint16_t height, const uint16_t* buffer, uint16_t fillColor = 0);

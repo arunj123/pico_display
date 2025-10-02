@@ -3,21 +3,45 @@
 #include "RotaryEncoder.h"
 #include "hardware/gpio.h"
 #include "hardware/sync.h"
+#include "hardware/irq.h"
 #include "pico/time.h"
 #include "config.h"
+#include <cstdio>
 
-// A static pointer to the single instance of the encoder.
-// This is necessary for the C-style ISR to call the C++ method.
 static RotaryEncoder* g_encoder_instance = nullptr;
 
+// Raw IRQ handler that checks for events on registered pins.
+static void shared_gpio_irq_handler() {
+    if (g_encoder_instance) {
+        uint pin_a = g_encoder_instance->get_pin_A();
+        uint pin_key = g_encoder_instance->get_pin_Key();
+
+        // Handle Pin A (Rotation)
+        if (gpio_get_irq_event_mask(pin_a) & GPIO_IRQ_EDGE_FALL) {
+            gpio_acknowledge_irq(pin_a, GPIO_IRQ_EDGE_FALL);
+            g_encoder_instance->_rotation_isr();
+        }
+
+        // Handle Key Pin (Press)
+        if (gpio_get_irq_event_mask(pin_key) & GPIO_IRQ_EDGE_FALL) {
+            gpio_acknowledge_irq(pin_key, GPIO_IRQ_EDGE_FALL);
+            g_encoder_instance->_key_isr();
+        }
+    }
+}
+
+// --- THE FIX: Constructor is now minimal ---
+// It only sets up internal state and does NOT touch hardware.
 RotaryEncoder::RotaryEncoder(uint pin_A, uint pin_B, uint pin_Key) :
     m_pin_A(pin_A), m_pin_B(pin_B), m_pin_Key(pin_Key)
 {
     assert(!g_encoder_instance);
     g_encoder_instance = this;
-
     critical_section_init(&m_crit_sec);
+}
 
+void RotaryEncoder::init()
+{
     // --- Init GPIOs ---
     gpio_init(m_pin_A);
     gpio_set_dir(m_pin_A, GPIO_IN);
@@ -31,33 +55,30 @@ RotaryEncoder::RotaryEncoder(uint pin_A, uint pin_B, uint pin_Key) :
     gpio_set_dir(m_pin_Key, GPIO_IN);
     gpio_pull_up(m_pin_Key);
 
-    // --- Init Interrupts ---
-    // The shared handler will be called for any of these pins.
-    // Trigger rotation ISR on the falling edge of Pin A.
-    // Trigger key ISR on the falling edge of the Key pin.
-    gpio_set_irq_enabled_with_callback(
-        m_pin_A, GPIO_IRQ_EDGE_FALL, true, &RotaryEncoder::gpio_irq_handler);
-        
-    gpio_set_irq_enabled(
-        m_pin_Key, GPIO_IRQ_EDGE_FALL, true);
+    // --- Register our raw handler and enable IRQs ---
+    uint32_t irq_mask = (1u << m_pin_A) | (1u << m_pin_Key);
+
+    // --- THE FIX: Add an explicit, higher priority for the handler ---
+    // This priority ensures it runs before many lower-priority SDK handlers.
+    gpio_add_raw_irq_handler_with_order_priority_masked(
+        irq_mask, 
+        &shared_gpio_irq_handler,
+        PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY // <-- Use a higher priority
+    );
+
+    irq_set_enabled(IO_IRQ_BANK0, true);
+
+    gpio_set_irq_enabled(m_pin_A, GPIO_IRQ_EDGE_FALL, true);
+    gpio_set_irq_enabled(m_pin_Key, GPIO_IRQ_EDGE_FALL, true);
 }
 
-// Static C-style ISR that forwards to the C++ class instance
-void RotaryEncoder::gpio_irq_handler(uint gpio, uint32_t events) {
-    if (g_encoder_instance) {
-        if (gpio == g_encoder_instance->m_pin_A) {
-            g_encoder_instance->_rotation_isr();
-        } else if (gpio == g_encoder_instance->m_pin_Key) {
-            g_encoder_instance->_key_isr();
-        }
-    }
-}
 
 void RotaryEncoder::_key_isr() {
     m_key_event_occurred = true;
 }
 
 void RotaryEncoder::_rotation_isr() {
+    // --- Restore the original, correct logic ---
     uint64_t now_us = time_us_64();
     if ((now_us - m_last_rotation_interrupt_time_us) < (DEBOUNCE_DELAY_MS_ROTATION * 1000)) {
         return;
