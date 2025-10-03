@@ -1,39 +1,53 @@
-# Pico W BLE Media Controller & Keyboard
+# Pico W BLE Media Controller & Dynamic TCP Weather Display
 
-This project transforms a Raspberry Pi Pico W into a versatile, standalone Bluetooth Low Energy (BLE) Human Interface Device (HID). It provides two distinct, high-quality firmware targets: an advanced Media Controller with a rotary encoder and an LCD display, and a classic BLE Keyboard.
+This project transforms a Raspberry Pi Pico W into a versatile, multi-function device. It provides two distinct, high-quality firmware targets and a sophisticated Python host application.
 
-The project is architected in C++ for robustness and clarity, leveraging the Raspberry Pi Pico's unique Programmable I/O (PIO) for high-performance peripheral control and standard GPIO interrupts for efficient user input.
+1.  **Advanced Media Controller (`media_app`):** The flagship application. It's a BLE Human Interface Device (HID) with a rotary encoder for media control, which also connects to your local Wi-Fi to receive data from a host application. It then renders a beautiful, real-time weather and clock display on a color LCD.
+2.  **Classic BLE Keyboard (`keyboard_app`):** A more traditional firmware that turns the Pico W into a simple wireless keyboard.
+
+The project is architected in C++ for performance and clarity, heavily leveraging the Pico's unique Programmable I/O (PIO) and demonstrating a robust cooperative multitasking approach to handle Bluetooth, Wi-Fi, and hardware interrupts simultaneously.
 
 ## Features
 
-### 1. Media Controller (`media_app`)
+### 1. Media Controller & Weather Display (`media_app`)
 
-This is the flagship application of the project. It turns the Pico W into a sophisticated wireless media knob.
+This is a sophisticated, network-connected information display and media controller.
 
+*   **Dual-Functionality:** Operates simultaneously as a BLE media controller and a Wi-Fi-connected display client.
 *   **Rotary Encoder Input:**
-    *   **Rotation:** Controls volume up and down on the connected host device (PC, phone, tablet).
+    *   **Rotation:** Controls volume up/down on the connected host (PC, phone).
     *   **Push-Button:** Toggles mute on/off.
-*   **ST7789 Color LCD Display:**
-    *   Provides a rich graphical user interface.
-    *   Displays status, icons, text, and graphical elements.
-    *   High-speed, non-blocking driver powered by a PIO state machine.
-*   **Bluetooth LE Connectivity:**
-    *   Reports as a standard "Consumer Control" HID device for broad compatibility.
-    *   Includes a Battery Service to report power levels to the host.
-*   **Robust and Efficient Design:**
-    *   The rotary encoder is read using a highly reliable, low-overhead interrupt-driven method.
-    *   Button presses are debounced with a state machine in the main application loop to prevent glitches and double-clicks.
-    *   The entire application is event-driven and sleeps when idle to conserve power.
+*   **Dynamic Weather & Clock Display:**
+    *   Receives image data over a custom TCP protocol from a host Python application.
+    *   Renders a beautiful UI with a dynamic gradient background that changes based on the time of day.
+    *   Displays the current time, date, weather icon, temperature, weather description, wind speed, humidity, sunrise, and sunset times.
+*   **ST7789 Color LCD:**
+    *   High-speed, non-blocking driver powered by a PIO state machine to offload the CPU.
+*   **Bluetooth LE HID:**
+    *   Reports as a standard "Consumer Control" device for broad compatibility.
+*   **Robust, Non-Blocking Design:**
+    *   The entire application runs in a cooperative, single-threaded main loop that services Wi-Fi, Bluetooth, and application logic without panics or race conditions.
+    *   Encoder inputs are captured via high-priority GPIO interrupts that coexist safely with the wireless driver.
 
-### 2. BLE Keyboard (`keyboard_app`)
+### 2. Host Weather Display Application (`display_manager.py`)
+
+A Python application designed to run on a networked computer (like a Raspberry Pi or PC) that serves data to the Pico W.
+
+*   **Live Data Fetching:** Periodically pulls real-time weather data from the Open-Meteo API.
+*   **Advanced UI Generation:** Creates a polished, aesthetically pleasing UI image using the Pillow library, complete with colorful, programmatically drawn weather icons.
+*   **Efficient "Diff & Tile" Algorithm:**
+    *   To minimize network traffic and prevent screen flicker, the script compares the newly generated UI with the last frame sent.
+    *   It calculates the smallest rectangular "bounding box" that contains all the changed pixels (a "diff").
+    *   If this diff is larger than the 8KB TCP payload limit, it is automatically broken down into smaller "tiles."
+    *   Only the necessary tiles are sent to the Pico W. This is extremely efficient for updates like the clock changing, where only a small part of the screen needs to be redrawn.
+*   **Reliable TCP Communication:** Uses a custom, framed TCP protocol to send image tiles to the Pico W.
+
+### 3. BLE Keyboard (`keyboard_app`)
 
 A more traditional HID implementation that turns the Pico W into a wireless keyboard.
 
-*   **Standard HID Keyboard:** Emulates a standard USB keyboard over BLE.
-*   **Multiple Input Modes:**
-    *   **Stdin Mode:** (If `HAVE_BTSTACK_STDIN` is defined) Type characters into a serial terminal (like PuTTY or Minicom) and have them sent as keystrokes.
-    *   **Demo Mode:** (Default) Automatically types a pre-defined string of text, demonstrating the keyboard functionality without any external input.
-*   **US Keyboard Layout:** Includes a full implementation for a standard US keyboard layout, mapping ASCII characters to the correct HID keycodes and modifiers.
+*   **Standard HID Keyboard:** Emulates a standard keyboard over BLE.
+*   **Multiple Input Modes:** Can be controlled via a serial terminal or run in an automatic demo mode.
 
 ## Hardware & Wiring
 
@@ -41,74 +55,109 @@ A more traditional HID implementation that turns the Pico W into a wireless keyb
 
 *   Raspberry Pi Pico W
 *   Rotary Encoder (EC11-style with push-button)
-*   2.0" 240x320 ST7789 TFT LCD Display (Model: GMT020-02 or similar)
+*   2.0" 240x320 ST7789 TFT LCD Display (e.g., Model: GMT020-02 or similar)
 *   Breadboard and jumper wires
 
 ### Wiring Schematics
 
-Carefully wire the components to the Pico W according to the tables below.
+#### Rotary Encoder
 
-#### Rotary Encoder Wiring
+| Encoder Pin | Pico Physical Pin | Pico GPIO Pin |
+|:------------|:------------------|:--------------|
+| `GND`       | `38`              | `GND`         |
+| `S1` / `A`  | `14`              | `GPIO10`      |
+| `S2` / `B`  | `15`              | `GPIO11`      |
+| `KEY`       | `16`              | `GPIO12`      |
 
-| Encoder Pin | Pico Physical Pin | Pico GPIO Pin | Description        |
-|:------------|:------------------|:--------------|:-------------------|
-| `GND`       | `38`              | `GND`         | Ground             |
-| `S1` / `A`  | `14`              | `GPIO10`      | Encoder Signal A   |
-| `S2` / `B`  | `15`              | `GPIO11`      | Encoder Signal B   |
-| `KEY`       | `16`              | `GPIO12`      | Push-Button Switch |
-| `+`         | -                 | *Unconnected* | VCC (Not needed with internal pull-ups) |
+#### ST7789 Display
 
-#### ST7789 Display Wiring (GMT020-02)
+| Display Pin | Pico Physical Pin | Pico GPIO Pin |
+|:------------|:------------------|:--------------|
+| `VCC`       | `36`              | `3V3(OUT)`    |
+| `GND`       | `3`               | `GND`         |
+| **SCL**     | `21`              | `GPIO16`      |
+| **SDA**     | `22`              | `GPIO17`      |
+| **RST**     | `24`              | `GPIO18`      |
+| **DC**      | `25`              | `GPIO19`      |
+| **CS**      | `26`              | `GPIO20`      |
+| `BL`        | `36`              | `3V3(OUT)`    |
 
-| Display Pin | Function      | Pico Physical Pin | Pico GPIO Pin |
-|:------------|:--------------|:------------------|:--------------|
-| `VCC`       | Power (3.3V)  | `36`              | `3V3(OUT)`    |
-| `GND`       | Ground        | `3`               | `GND`         |
-| **SCL**     | Serial Clock  | `21`              | `GPIO16`      |
-| **SDA**     | Serial Data   | `22`              | `GPIO17`      |
-| **RST**     | Reset         | `24`              | `GPIO18`      |
-| **DC** / **RS** | Data/Command  | `25`              | `GPIO19`      |
-| **CS**      | Chip Select   | `26`              | `GPIO20`      |
-| `BL` / `LED`| Backlight     | `36`              | `3V3(OUT)`    |
+## Project Architecture and Design Decisions
 
-## Project Architecture and Design
+### Firmware (C++)
 
-The project is written in C++ and heavily leverages object-oriented principles to create modular, reusable, and easy-to-understand components.
+*   **Cooperative Multitasking:** The `media_app` must handle three asynchronous tasks: Bluetooth events, Wi-Fi/TCP events, and user input. The core design decision was to use a single, non-blocking main `while(true)` loop in `MediaApplication::run()`. This loop is paced by the `cyw43_arch_wait_for_work_until()` function, which efficiently yields CPU time, allowing both the BTstack and lwIP networking stacks to process their background tasks without conflict. This avoids the panics and instability that arise from attempting to use blocking calls within different interrupt contexts.
 
-### Core Classes
+*   **Interrupt Handling:** The Pico W wireless driver takes ownership of the primary GPIO interrupt handler. To allow the `RotaryEncoder` to also respond to high-frequency events, it was designed to register its own **raw interrupt handler** using `gpio_add_raw_irq_handler_with_order_priority_masked`. This allows it to coexist with the wireless driver, with a high enough priority to ensure encoder clicks are not missed during Wi-Fi activity.
 
-*   **`MediaApplication`**: The central orchestrator for the `media_app`. It initializes all hardware and software components, contains the main polling loop, and implements a robust state machine for debouncing the encoder's push-button.
+*   **Non-Blocking TCP Server:** To prevent panics caused by calling blocking functions from an interrupt context, the `TcpServer` is designed with a **producer-consumer** pattern. The lwIP receive callback (the producer, running in an interrupt context) does the absolute minimum: it verifies the data and pushes it onto a thread-safe queue (`m_tile_queue`). The main application loop (the consumer) then safely pops from this queue and performs the slow, blocking `drawImage` operation.
 
-*   **`RotaryEncoder`**: A self-contained class that manages the rotary encoder. It uses GPIO interrupts on the encoder's pins to detect events reliably without consuming CPU cycles in the main loop. The ISRs are extremely lightweight, simply setting flags that are then processed safely by the `MediaApplication`.
+*   **PIO for Display:** The `St7789Display` driver offloads the high-speed SPI data transmission to a PIO state machine. This is a key performance optimization, as it allows the CPU to perform other tasks while the DMA and PIO work in the background to send pixel data to the screen.
 
-*   **`St7789Display`**: A low-level driver for the ST7789 display. It uses a **PIO state machine** (`st7789_lcd.pio`) to handle the high-speed SPI data transmission, offloading the CPU and preventing the application from blocking during screen updates.
+### Host Application (Python)
 
-*   **`Drawing`**: A high-level graphics class that sits on top of the `Display` driver. It provides a simple API for drawing primitives (pixels, lines, rectangles), text (using custom bitmap fonts), and images.
+*   **Modular Design:** The Python code is split into logical modules:
+    *   `config.py`: Centralized configuration for IP addresses, pins, fonts, and colors.
+    *   `weather.py`: Dedicated to fetching and parsing data from the weather API.
+    *   `ui_generator.py`: Handles all graphics, icon drawing, and layout logic.
+    *   `display_manager.py`: The main application orchestrator that handles device connection, the diff/tile algorithm, and the main update loop.
+*   **Efficient Screen Updates:** The decision to implement a "diff and tile" algorithm is central to the project's performance. Instead of sending a full 150KB framebuffer every second, it sends only a few kilobytes when the time changes, making the application extremely network-efficient.
+*   **Robust Communication:** The initial design used a simple echo. This was replaced with a more robust framed protocol. When stability issues arose, an ACK/NACK flow control system was added, and finally simplified by relying on TCP's inherent reliability. The final protocol sends self-contained `IMAGE_TILE` frames, which is both simple and effective.
 
-*   **`HidDevice`**: A generic base class that encapsulates the common logic for creating a BLE HID device using the BTstack library. It manages connection state and packet handling.
+## Building and Flashing (Firmware)
 
-*   **`MediaControllerDevice`**: Inherits from `HidDevice` and specializes it for a consumer media controller. It provides the specific HID descriptor and methods like `increaseVolume()`, `mute()`, etc., that send the correct HID reports.
-
-*   **`BtStackManager`**: A singleton class that provides a clean C++ wrapper around the C-based BTstack library, forwarding events to the appropriate handler and simplifying integration.
-
-### Asset Pipeline
-
-The project includes Python scripts to automatically convert assets into C++ header files, streamlining the development workflow.
-
-*   **`image_converter.py`**: Converts standard image files (PNG, JPG, etc.) into a C header file containing the image data as a 16-bit RGB565 array. It automatically resizes the image to fit the display while maintaining its aspect ratio.
-*   **`create_font.py`**: Converts any TrueType Font (`.ttf`) file into a custom bitmap font, also stored in a C header, which can then be used by the `Drawing` class.
-
-## Building and Flashing
-
-This project is configured to be built with the standard Raspberry Pi Pico C/C++ SDK toolchain using CMake and Ninja. The `.vscode` directory is pre-configured for a seamless development experience in Visual Studio Code.
+This project uses the standard Raspberry Pi Pico C/C++ SDK. The recommended environment is VS Code with the official Pico extension.
 
 ### Prerequisites
 
-1.  **VS Code with Extensions:**
-    *   Visual Studio Code
-    *   The official **Raspberry Pi Pico** extension pack. This will install all necessary tools (compilers, CMake, Ninja, OpenOCD, etc.) and configure your environment automatically.
+1.  Visual Studio Code.
+2.  The official **Raspberry Pi Pico (C/C++ SDK)** extension. This will install the toolchain (compilers, CMake, etc.) for you.
 
-2.  **Pico SDK:** The first time you open the project in VS Code, the extension will prompt you to install the SDK. Follow the instructions to let it download and configure everything for you.
+### Build & Flash with VS Code
+
+1.  **Open the project folder** in VS Code.
+2.  Select the **CMake** extension from the activity bar.
+3.  Choose the desired build target: `media_app` or `keyboard_app`.
+4.  Press **`F7`** to build the project.
+5.  Put your Pico W into **BOOTSEL mode** (hold the BOOTSEL button while plugging it in).
+6.  In VS Code, open the command palette (`Ctrl+Shift+P`) and run the task **"Tasks: Run Task" -> "Flash media_app (openocd)"** (or the keyboard equivalent).
+
+## Running the Host Weather Display
+
+The Python script sends the UI to your Pico W over Wi-Fi.
+
+### Prerequisites
+
+1.  **Python 3.x** installed on your computer.
+2.  Install the required libraries:
+    ```bash
+    pip install requests Pillow
+    ```
+3.  Download the required fonts (`FreeSansBold.ttf`, `Ubuntu-L.ttf`) and place them in a `fonts` sub-directory.
+
+### Configuration
+
+1.  Open `config.py`.
+2.  Set the `PICO_IP` variable to the IP address assigned to your Pico W (you can see this in the serial monitor output when it connects to Wi-Fi).
+3.  Set your `LOCATION_LAT` and `LOCATION_LON` for accurate weather.
+
+### Execution
+
+Run the main display manager script from your terminal:
+```bash
+python display_manager.py
+```
+The script will connect to your Pico W, fetch the weather, and begin sending screen updates.
+
+## Key Problems Solved
+
+This project overcame several complex integration challenges common in embedded systems:
+
+1.  **Wi-Fi and BLE Coexistence:** Solved initial panics by using the correct lwIP-aware CYW43 driver library (`pico_cyw43_arch_lwip_threadsafe_background`) and a cooperative main loop (`cyw43_arch_wait_for_work_until`).
+2.  **GPIO Interrupt Conflicts:** Resolved `Hard assert` panics by converting the `RotaryEncoder` from a simple GPIO callback to a high-priority Raw IRQ Handler, allowing it to coexist with the wireless driver's interrupt requirements.
+3.  **Concurrency Panics (`sleep in handler`):** Eliminated panics by architecting a producer-consumer pattern. The TCP receive callback (interrupt context) only pushes data to a queue, while the main application loop is the only place where slow, blocking functions (`drawImage`) are called.
+4.  **Memory Leaks (`pbuf_free`):** Fixed a subtle memory leak in the TCP server where empty packets were not being correctly freed, eventually exhausting the lwIP memory pool and causing a crash after long run times.
+5.  **Inefficient Display Updates:** Implemented an intelligent "diff and tile" algorithm in the Python host to drastically reduce network traffic, only sending the portions of the screen that have actually changed.
 
 ### Building and Flashing with VS Code (Recommended)
 
@@ -161,5 +210,5 @@ The included `.vscode` configuration files (`settings.json`, `tasks.json`, `laun
 
 ## Acknowledgements
 
-*   The PIO program (`st7789_lcd.pio`) for the display driver is based on the official examples from the Raspberry Pi Pico SDK.
+*   The PIO program for the display driver is based on the official examples from the Raspberry Pi Pico SDK.
 *   The original C-based keyboard example that inspired the `keyboard_app` is from the [pico-examples](https://github.com/raspberrypi/pico-examples) repository.
