@@ -116,6 +116,7 @@ void on_frame_received(const Frame& frame) {
     if (!g_app_instance) return;
 
     if (frame.header.type == IMAGE_TILE) {
+        printf("DEBUG: ISR received a tile frame.\n");
         ImageTileHeader tile_header;
         memcpy(&tile_header, frame.payload.data(), sizeof(ImageTileHeader));
         const uint8_t* pixel_data_bytes = frame.payload.data() + sizeof(ImageTileHeader);
@@ -123,6 +124,7 @@ void on_frame_received(const Frame& frame) {
         uint32_t calculated_crc = calculate_crc32(pixel_data_bytes, pixel_data_len);
 
         if (calculated_crc == tile_header.crc32) {
+            printf("DEBUG: CRC OK. Pushing tile (%dx%d at %d,%d) to queue.\n", tile_header.width, tile_header.height, tile_header.x, tile_header.y);
             g_app_instance->push_tile_to_queue(frame);
         } else {
             printf("!!! CHECKSUM MISMATCH !!! Host: 0x%08lX, Pico: 0x%08lX\n", tile_header.crc32, calculated_crc);
@@ -267,17 +269,16 @@ void MediaApplication::run() {
         }
 
         // 2. Drive the non-blocking drawing engine and TCP logic
-        Drawing::DrawStatus draw_status = m_drawing.processDrawing();
+        Drawing::DrawStatus current_draw_status = m_drawing.processDrawing();
 
-        // Check if a drawing job has JUST completed on this loop iteration
-        if (m_last_draw_status == Drawing::BUSY && draw_status == Drawing::IDLE) {
-            // The job is finished, now we can safely send the ACK
+        // Has a drawing job JUST completed on this loop iteration?
+        if (m_last_draw_status == Drawing::BUSY && current_draw_status == Drawing::IDLE) {
+            // If yes, our only job this iteration is to send the ACK.
+            // The 'else if' will prevent us from immediately starting a new job.
             m_tcp_server.send_frame(TILE_ACK, {});
-        }
-        m_last_draw_status = draw_status;
-
-        // If the drawing engine is idle, we are free to check for and start a new job.
-        if (draw_status == Drawing::IDLE) {
+        } 
+        // OTHERWISE, if the engine is idle, are we free to start a NEW job?
+        else if (current_draw_status == Drawing::IDLE) {
             Frame new_tile_to_draw;
             bool has_new_tile = false;
 
@@ -302,6 +303,9 @@ void MediaApplication::run() {
                 m_drawing.drawImageAsync(tile_header.x, tile_header.y, tile_header.width, tile_header.height, pixel_data);
             }
         }
+
+        // IMPORTANT: Update the status for the *next* loop iteration
+        m_last_draw_status = current_draw_status;
 
     }
 }

@@ -82,14 +82,30 @@ class DeviceManager:
             crc = zlib.crc32(padded_pixel_data)
             
             tile_x_global, tile_y_global = offset_x, offset_y + y
+
+            # --- Retry loop for network resilience ---
+            MAX_RETRIES = 3
+            ack_received = False
+            for attempt in range(MAX_RETRIES):
+                print(f"  - Sending tile {tile_count+1}: Pos({tile_x_global},{tile_y_global}), Size({sub_width}x{tile_height}), CRC(0x{crc:08X}) (Attempt {attempt+1})")
+                
+                # Action 1: Send the tile
+                if not self._send_tile(tile_x_global, tile_y_global, sub_width, tile_height, crc, padded_pixel_data):
+                    # If sendall() fails, the connection is truly dead.
+                    return False, previous_image
+
+                # Action 2: Wait for the ACK
+                if self._wait_for_ack():
+                    ack_received = True
+                    break # Success! Exit the retry loop.
+                else:
+                    print(f"  - WARNING: Timed out waiting for ACK for tile {tile_count+1}. Retrying...")
             
-            print(f"  - Sending tile {tile_count+1}: Pos({tile_x_global},{tile_y_global}), Size({sub_width}x{tile_height}), CRC(0x{crc:08X})")
-            
-            # Call send_tile ONCE with all correct parameters
-            if not self._send_tile(tile_x_global, tile_y_global, sub_width, tile_height, crc, padded_pixel_data):
+            if not ack_received:
+                print(f"  - FATAL: Failed to get ACK for tile {tile_count+1} after {MAX_RETRIES} attempts.")
                 return False, previous_image
-            
-            # Reconstruct the image from the original, unpadded tile data
+
+            # Reconstruct the image locally upon success
             tile_img = ui_generator.reconstruct_image_from_rgb565(tile_pixel_data, sub_width, tile_height)
             reconstructed_image.paste(tile_img, (tile_x_global, tile_y_global))
                 
@@ -99,12 +115,13 @@ class DeviceManager:
         return True, reconstructed_image
 
     def _send_tile(self, x, y, w, h, crc, pixel_data):
+        """Packs and sends a single image tile frame without waiting for an ACK."""
         try:
             tile_header = struct.pack(config.IMAGE_TILE_HEADER_FORMAT, x, y, w, h, crc)
             payload = tile_header + pixel_data
             frame = pack_frame(config.FRAME_TYPE_IMAGE_TILE, payload)
             self.sock.sendall(frame)
-            return self._wait_for_ack()
+            return True
         except OSError as e:
             print(f"Socket error during send: {e}")
             self.close()

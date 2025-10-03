@@ -117,50 +117,48 @@ void Drawing::drawImageBlocking(uint16_t x, uint16_t y, uint16_t width, uint16_t
 }
 
 bool Drawing::drawImageAsync(uint16_t x, uint16_t y, uint16_t width, uint16_t height, const uint16_t* image_data) {
-    // Don't start a new job if one is already in progress
     if (m_status == BUSY) {
         return false;
     }
-
-    // Set up the state for the new job
     m_status = BUSY;
     m_async_x = x;
     m_async_y = y;
     m_async_width = width;
     m_async_height = height;
-    m_async_data = image_data;
-    m_async_y_offset = 0; // Reset progress
+    m_async_y_offset = 0;
+
+    // Copy the pixel data from the source pointer into our internal buffer.
+    size_t pixel_count = width * height;
+    m_async_pixel_buffer.assign(image_data, image_data + pixel_count);
 
     return true;
 }
 
 Drawing::DrawStatus Drawing::processDrawing() {
-    // If there's no active job, do nothing.
     if (m_status == IDLE) {
         return IDLE;
     }
 
-    // --- This is the core chunking logic, now encapsulated within the driver ---
-    const int ROWS_PER_CHUNK = 4; // A good balance of speed and responsiveness
-
+    const int ROWS_PER_CHUNK = 4;
     int rows_remaining = m_async_height - m_async_y_offset;
     int rows_to_draw = (rows_remaining < ROWS_PER_CHUNK) ? rows_remaining : ROWS_PER_CHUNK;
 
     if (rows_to_draw > 0) {
-        // Calculate the starting position and data pointer for this specific chunk
         uint16_t start_y = m_async_y + m_async_y_offset;
-        const uint16_t* chunk_pixel_data = m_async_data + (m_async_y_offset * m_async_width);
+        
+        // Get a pointer to the start of our SAFE, internal buffer.
+        const uint16_t* all_pixel_data = m_async_pixel_buffer.data();
+        const uint16_t* chunk_pixel_data = all_pixel_data + (m_async_y_offset * m_async_width);
 
-        // Call the low-level blocking function for just this small chunk
         drawImage(m_async_x, start_y, m_async_width, rows_to_draw, chunk_pixel_data);
-
-        // Update our progress
         m_async_y_offset += rows_to_draw;
     }
 
-    // Check if we have finished drawing the entire image
     if (m_async_y_offset >= m_async_height) {
-        m_status = IDLE; // The job is done, switch back to IDLE
+        m_status = IDLE;
+        // --- MEMORY OPTIMIZATION ---
+        // Clear the buffer to free the memory now that we're done with it.
+        m_async_pixel_buffer.clear();
     }
 
     return m_status;

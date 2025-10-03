@@ -5,6 +5,7 @@
 
 #include "Display.h"
 #include "CustomFont.h"
+#include <vector>
 
 class Drawing {
 public:
@@ -55,11 +56,11 @@ public:
 private:
     St7789Display& m_display;
 
-    // --- NEW: State variables for the asynchronous drawing job ---
+    // --- State variables for the asynchronous drawing job ---
     DrawStatus m_status;
     uint16_t m_async_x, m_async_y, m_async_width, m_async_height;
-    const uint16_t* m_async_data;
-    int m_async_y_offset; // How many rows we've drawn so far
+    std::vector<uint16_t> m_async_pixel_buffer;
+    int m_async_y_offset;
 };
 
 #endif // DRAWING_H
