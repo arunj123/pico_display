@@ -50,6 +50,7 @@ private:
     critical_section_t m_tile_queue_crit_sec;
     std::vector<Frame> m_tile_queue;
     volatile TileRxStatus m_tile_rx_status;
+    Drawing::DrawStatus m_last_draw_status;
 
     // Static forwarders
     static void release_handler_forwarder(btstack_timer_source_t* ts);

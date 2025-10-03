@@ -124,7 +124,6 @@ void on_frame_received(const Frame& frame) {
 
         if (calculated_crc == tile_header.crc32) {
             g_app_instance->push_tile_to_queue(frame);
-            g_app_instance->set_tile_rx_status(TileRxStatus::ACK_PENDING);
         } else {
             printf("!!! CHECKSUM MISMATCH !!! Host: 0x%08lX, Pico: 0x%08lX\n", tile_header.crc32, calculated_crc);
             g_app_instance->set_tile_rx_status(TileRxStatus::NACK_PENDING);
@@ -182,7 +181,7 @@ void MediaApplication::run() {
     m_display.fillScreen(Colors::BLACK);
     m_drawing.fillRect(10, 10, m_drawing.getWidth() - 20, 30, Colors::RED);
     m_drawing.drawRect(9, 9, m_drawing.getWidth() - 18, 32, Colors::WHITE);
-    m_drawing.drawImage(
+    m_drawing.drawImageBlocking(
         (m_drawing.getWidth() - test_img_width) / 2,
         (m_drawing.getHeight() - test_img_height) / 2,
         test_img_width,
@@ -214,52 +213,13 @@ void MediaApplication::run() {
 
     // ---  MAIN LOOP ---
     while (true) {
-        // This call is the heart of the cooperative multitasking.
+        // This is the most important call. It handles all background work for
+        // BTstack and lwIP, and then sleeps for a short time.
         cyw43_arch_wait_for_work_until(make_timeout_time_ms(10));
 
-        // --- Our application state machine ---
-        TileRxStatus status_to_send = TileRxStatus::NONE;
-        Frame tile_to_draw;
-        bool has_tile_to_draw = false;
+        // --- Now, perform all our application logic sequentially ---
 
-        critical_section_enter_blocking(&m_tile_queue_crit_sec);
-        if (m_tile_rx_status != TileRxStatus::NONE) {
-            status_to_send = m_tile_rx_status;
-            m_tile_rx_status = TileRxStatus::NONE;
-        } else if (!m_tile_queue.empty()) {
-            has_tile_to_draw = true;
-            tile_to_draw = m_tile_queue.front();
-            m_tile_queue.erase(m_tile_queue.begin());
-        }
-        critical_section_exit(&m_tile_queue_crit_sec);
-
-        // Perform blocking actions based on the state we captured
-        if (status_to_send == TileRxStatus::ACK_PENDING) {
-            m_tcp_server.send_frame(TILE_ACK, {});
-        } else if (status_to_send == TileRxStatus::NACK_PENDING) {
-            m_tcp_server.send_frame(TILE_NACK, {});
-        } else if (has_tile_to_draw) {
-            ImageTileHeader tile_header;
-            memcpy(&tile_header, tile_to_draw.payload.data(), sizeof(ImageTileHeader));
-            const uint16_t* pixel_data = reinterpret_cast<const uint16_t*>(
-                tile_to_draw.payload.data() + sizeof(ImageTileHeader)
-            );
-            m_drawing.drawImage(tile_header.x, tile_header.y, tile_header.width, tile_header.height, pixel_data);
-        } else {
-            // If there's no TCP work, handle the encoder
-            // (You can move this outside the else if you want it to be more responsive)
-            int8_t rotation_delta = m_encoder.read_and_clear_rotation();
-            if (rotation_delta > 0) {
-                m_media_controller.increaseVolume();
-                btstack_run_loop_set_timer(&m_release_timer, RELEASE_DELAY_MS);
-                btstack_run_loop_add_timer(&m_release_timer);
-            } else if (rotation_delta < 0) {
-                m_media_controller.decreaseVolume();
-                btstack_run_loop_set_timer(&m_release_timer, RELEASE_DELAY_MS);
-                btstack_run_loop_add_timer(&m_release_timer);
-            }
-        }
-
+        // 1. Handle Encoder (always runs, non-blocking)
         if (m_media_controller.isConnected()) {
             int8_t rotation_delta = m_encoder.read_and_clear_rotation();
             
@@ -305,6 +265,44 @@ void MediaApplication::run() {
                     break;
             }
         }
+
+        // 2. Drive the non-blocking drawing engine and TCP logic
+        Drawing::DrawStatus draw_status = m_drawing.processDrawing();
+
+        // Check if a drawing job has JUST completed on this loop iteration
+        if (m_last_draw_status == Drawing::BUSY && draw_status == Drawing::IDLE) {
+            // The job is finished, now we can safely send the ACK
+            m_tcp_server.send_frame(TILE_ACK, {});
+        }
+        m_last_draw_status = draw_status;
+
+        // If the drawing engine is idle, we are free to check for and start a new job.
+        if (draw_status == Drawing::IDLE) {
+            Frame new_tile_to_draw;
+            bool has_new_tile = false;
+
+            // Check if a tile has arrived from the network
+            critical_section_enter_blocking(&m_tile_queue_crit_sec);
+            if (!m_tile_queue.empty()) {
+                has_new_tile = true;
+                new_tile_to_draw = m_tile_queue.front();
+                m_tile_queue.erase(m_tile_queue.begin());
+            }
+            critical_section_exit(&m_tile_queue_crit_sec);
+
+            // If we have a new tile, start the asynchronous drawing operation
+            if (has_new_tile) {
+                ImageTileHeader tile_header;
+                memcpy(&tile_header, new_tile_to_draw.payload.data(), sizeof(ImageTileHeader));
+                const uint16_t* pixel_data = reinterpret_cast<const uint16_t*>(
+                    new_tile_to_draw.payload.data() + sizeof(ImageTileHeader)
+                );
+                
+                // This call returns immediately
+                m_drawing.drawImageAsync(tile_header.x, tile_header.y, tile_header.width, tile_header.height, pixel_data);
+            }
+        }
+
     }
 }
 
