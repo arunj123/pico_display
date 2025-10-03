@@ -82,20 +82,32 @@ void TcpServer::_parse_buffer() {
 }
 
 err_t TcpServer::_recv_callback(struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
+    // If p is NULL, the connection has been closed.
     if (p == nullptr) {
         printf("TCP Client disconnected.\n");
         _close_client_connection();
         return ERR_OK;
     }
 
+    // This method is called from an interrupt, so lock the scheduler
+    cyw43_arch_lwip_check();
+
     if (p->tot_len > 0) {
+        // Copy data from the pbuf chain to our application's buffer
         for (struct pbuf *q = p; q != nullptr; q = q->next) {
             m_rx_buffer.insert(m_rx_buffer.end(), (uint8_t*)q->payload, (uint8_t*)q->payload + q->len);
         }
+        // Tell lwIP we have processed the data from the TCP window
         tcp_recved(tpcb, p->tot_len);
-        _parse_buffer(); // Attempt to parse frames from the new data
     }
+    
+    // ALWAYS free the pbuf after we are done with it.
+    // This was the source of the memory leak.
     pbuf_free(p);
+
+    // Now, attempt to parse any complete frames from our application buffer
+    _parse_buffer();
+
     return ERR_OK;
 }
 
