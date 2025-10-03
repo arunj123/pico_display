@@ -111,7 +111,6 @@ void debug_print_gpio_status(uint gpio) {
     printf("--------------------\n");
 }
 
-// --- FINAL, CORRECT CALLBACK ---
 // This is the interrupt-context code. It does the bare minimum.
 void on_frame_received(const Frame& frame) {
     if (!g_app_instance) return;
@@ -121,7 +120,15 @@ void on_frame_received(const Frame& frame) {
         memcpy(&tile_header, frame.payload.data(), sizeof(ImageTileHeader));
         const uint8_t* pixel_data_bytes = frame.payload.data() + sizeof(ImageTileHeader);
         size_t pixel_data_len = frame.header.payload_length - sizeof(ImageTileHeader);
-        g_app_instance->push_tile_to_queue(frame);
+        uint32_t calculated_crc = calculate_crc32(pixel_data_bytes, pixel_data_len);
+
+        if (calculated_crc == tile_header.crc32) {
+            g_app_instance->push_tile_to_queue(frame);
+            g_app_instance->set_tile_rx_status(TileRxStatus::ACK_PENDING);
+        } else {
+            printf("!!! CHECKSUM MISMATCH !!! Host: 0x%08lX, Pico: 0x%08lX\n", tile_header.crc32, calculated_crc);
+            g_app_instance->set_tile_rx_status(TileRxStatus::NACK_PENDING);
+        }
     }
 }
 
@@ -132,7 +139,8 @@ MediaApplication::MediaApplication() :
     m_drawing(m_display),
     m_battery_level(100),
     m_button_state(ButtonState::IDLE),
-    m_button_armed_time_us(0)
+    m_button_armed_time_us(0),
+    m_tile_rx_status(TileRxStatus::NONE)
 {
     g_app_instance = this;
 
@@ -148,21 +156,26 @@ MediaApplication::MediaApplication() :
     m_tcp_server.setReceiveCallback(on_frame_received);
 }
 
-// --- NEW: Add the thread-safe queue push method ---
+void MediaApplication::set_tile_rx_status(TileRxStatus status) {
+    critical_section_enter_blocking(&m_tile_queue_crit_sec);
+    m_tile_rx_status = status;
+    critical_section_exit(&m_tile_queue_crit_sec);
+}
+
+// --- Add the thread-safe queue push method ---
 void MediaApplication::push_tile_to_queue(const Frame& frame) {
     critical_section_enter_blocking(&m_tile_queue_crit_sec);
     m_tile_queue.push_back(frame);
     critical_section_exit(&m_tile_queue_crit_sec);
 }
 
-// --- FINAL, CORRECT RUN LOOP ---
 void MediaApplication::run() {
     printf("Initializing Rotary Encoder...\n");
     m_encoder.init();
     sleep_ms(50);
     m_encoder.read_and_clear_rotation();
 
-    // --- THE FIX: Initialize display and draw the UI here ---
+    // --- Initialize display and draw the UI here ---
     printf("Initializing Display...\n");
     m_display.init();
     
@@ -199,28 +212,52 @@ void MediaApplication::run() {
     btstack_run_loop_set_timer(&m_battery_timer, 30000);
     btstack_run_loop_add_timer(&m_battery_timer);
 
-    // --- FINAL, CORRECT MAIN LOOP ---
+    // ---  MAIN LOOP ---
     while (true) {
+        // This call is the heart of the cooperative multitasking.
         cyw43_arch_wait_for_work_until(make_timeout_time_ms(10));
 
+        // --- Our application state machine ---
+        TileRxStatus status_to_send = TileRxStatus::NONE;
         Frame tile_to_draw;
         bool has_tile_to_draw = false;
 
         critical_section_enter_blocking(&m_tile_queue_crit_sec);
-        if (!m_tile_queue.empty()) {
+        if (m_tile_rx_status != TileRxStatus::NONE) {
+            status_to_send = m_tile_rx_status;
+            m_tile_rx_status = TileRxStatus::NONE;
+        } else if (!m_tile_queue.empty()) {
             has_tile_to_draw = true;
             tile_to_draw = m_tile_queue.front();
             m_tile_queue.erase(m_tile_queue.begin());
         }
         critical_section_exit(&m_tile_queue_crit_sec);
 
-        if (has_tile_to_draw) {
+        // Perform blocking actions based on the state we captured
+        if (status_to_send == TileRxStatus::ACK_PENDING) {
+            m_tcp_server.send_frame(TILE_ACK, {});
+        } else if (status_to_send == TileRxStatus::NACK_PENDING) {
+            m_tcp_server.send_frame(TILE_NACK, {});
+        } else if (has_tile_to_draw) {
             ImageTileHeader tile_header;
             memcpy(&tile_header, tile_to_draw.payload.data(), sizeof(ImageTileHeader));
             const uint16_t* pixel_data = reinterpret_cast<const uint16_t*>(
                 tile_to_draw.payload.data() + sizeof(ImageTileHeader)
             );
             m_drawing.drawImage(tile_header.x, tile_header.y, tile_header.width, tile_header.height, pixel_data);
+        } else {
+            // If there's no TCP work, handle the encoder
+            // (You can move this outside the else if you want it to be more responsive)
+            int8_t rotation_delta = m_encoder.read_and_clear_rotation();
+            if (rotation_delta > 0) {
+                m_media_controller.increaseVolume();
+                btstack_run_loop_set_timer(&m_release_timer, RELEASE_DELAY_MS);
+                btstack_run_loop_add_timer(&m_release_timer);
+            } else if (rotation_delta < 0) {
+                m_media_controller.decreaseVolume();
+                btstack_run_loop_set_timer(&m_release_timer, RELEASE_DELAY_MS);
+                btstack_run_loop_add_timer(&m_release_timer);
+            }
         }
 
         if (m_media_controller.isConnected()) {

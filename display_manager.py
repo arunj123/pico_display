@@ -11,7 +11,7 @@ import weather
 import ui_generator
 
 class DeviceManager:
-    """Manages low-level TCP communication with the Pico W device."""
+    """Manages robust, flow-controlled TCP communication with the Pico W device."""
     def __init__(self):
         self.sock = None
 
@@ -29,6 +29,10 @@ class DeviceManager:
             return False
 
     def send_image_diff(self, new_image, previous_image):
+        """
+        Calculates the difference, sends it in tiles with ACK/CRC flow control,
+        and returns the reconstructed image upon success.
+        """
         if not self.sock: return False, previous_image
 
         reconstructed_image = None
@@ -37,12 +41,13 @@ class DeviceManager:
             bbox = (0, 0, config.LCD_WIDTH, config.LCD_HEIGHT)
             reconstructed_image = Image.new('RGB', (config.LCD_WIDTH, config.LCD_HEIGHT))
         else:
+            # First, quantize the new image to match the color precision of the old one
             quantized_new_image = ui_generator.reconstruct_image_from_rgb565(
                 ui_generator.convert_image_to_rgb565(new_image), new_image.width, new_image.height
             )
             diff = ImageChops.difference(previous_image, quantized_new_image)
             bbox = diff.getbbox()
-            if not bbox: return True, previous_image
+            if not bbox: return True, previous_image # No changes
             reconstructed_image = previous_image.copy()
         
         print(f"Update Bounding Box: {bbox}")
@@ -55,47 +60,74 @@ class DeviceManager:
         
         bytes_per_row = sub_width * 2
         rows_per_tile = config.MAX_PIXEL_DATA_SIZE // bytes_per_row if bytes_per_row > 0 else 0
-        if rows_per_tile == 0: return False, previous_image
+        if rows_per_tile == 0:
+            print("Error: Tile is too narrow.")
+            return False, previous_image
 
         y = 0
+        tile_count = 0
         while y < sub_height:
             tile_height = min(rows_per_tile, sub_height - y)
             
-            # --- THE BUG FIX: Correctly slice the binary data for each tile ---
+            # Correctly slice the binary data for the current tile
             start_index = y * bytes_per_row
             end_index = (y + tile_height) * bytes_per_row
             tile_pixel_data = pixel_data_full[start_index:end_index]
             
+            # Pad the data for CRC calculation
+            padding = (4 - (len(tile_pixel_data) % 4)) % 4
+            padded_pixel_data = tile_pixel_data + (b'\x00' * padding)
+            
+            # Calculate CRC on the padded data
+            crc = zlib.crc32(padded_pixel_data)
+            
             tile_x_global, tile_y_global = offset_x, offset_y + y
             
-            print(f"  - Sending tile: Pos({tile_x_global},{tile_y_global}), Size({sub_width}x{tile_height})")
+            print(f"  - Sending tile {tile_count+1}: Pos({tile_x_global},{tile_y_global}), Size({sub_width}x{tile_height}), CRC(0x{crc:08X})")
             
-            if not self._send_tile(tile_x_global, tile_y_global, sub_width, tile_height, tile_pixel_data):
+            # Call send_tile ONCE with all correct parameters
+            if not self._send_tile(tile_x_global, tile_y_global, sub_width, tile_height, crc, padded_pixel_data):
                 return False, previous_image
             
-            # Reconstruct the image from the data that was actually sent
+            # Reconstruct the image from the original, unpadded tile data
             tile_img = ui_generator.reconstruct_image_from_rgb565(tile_pixel_data, sub_width, tile_height)
             reconstructed_image.paste(tile_img, (tile_x_global, tile_y_global))
                 
             y += tile_height
+            tile_count += 1
             
         return True, reconstructed_image
 
-    def _send_tile(self, x, y, w, h, pixel_data):
+    def _send_tile(self, x, y, w, h, crc, pixel_data):
         try:
-            # Simplified protocol without CRC
-            tile_header = struct.pack(config.IMAGE_TILE_HEADER_FORMAT, x, y, w, h)
+            tile_header = struct.pack(config.IMAGE_TILE_HEADER_FORMAT, x, y, w, h, crc)
             payload = tile_header + pixel_data
             frame = pack_frame(config.FRAME_TYPE_IMAGE_TILE, payload)
             self.sock.sendall(frame)
-            time.sleep(0.01) # Small delay for flow control
-            return True
+            return self._wait_for_ack()
         except OSError as e:
             print(f"Socket error during send: {e}")
             self.close()
             return False
             
-    # _wait_for_ack removed
+    def _wait_for_ack(self):
+        try:
+            self.sock.settimeout(5.0)
+            data = self.sock.recv(config.FRAME_HEADER_SIZE)
+            if not data or len(data) < config.FRAME_HEADER_SIZE:
+                print("ERROR: Did not receive a valid response from Pico.")
+                return False
+            magic, rcv_type, _ = struct.unpack(config.FRAME_HEADER_FORMAT, data)
+            if magic == config.FRAME_MAGIC and rcv_type == config.FRAME_TYPE_TILE_ACK:
+                return True
+            else:
+                print(f"ERROR: Received NACK or invalid response (type: {rcv_type}).")
+                return False
+        except socket.timeout:
+            print("ERROR: Timed out waiting for ACK from Pico.")
+            return False
+        finally:
+            self.sock.settimeout(None)
 
     def close(self):
         if self.sock:
@@ -111,7 +143,6 @@ def main():
     if os.path.exists(config.STATE_IMAGE_PATH):
         try:
             os.remove(config.STATE_IMAGE_PATH)
-            print(f"Removed old state file: {config.STATE_IMAGE_PATH}")
         except OSError as e:
             print(f"Error removing old state file: {e}")
 
@@ -144,20 +175,14 @@ def main():
                 date_string = now.strftime("%a, %b %d")
                 new_image = ui_generator.create_ui_image(time_string, date_string, current_weather)
 
-                # --- THE FIX: Quantize the new image BEFORE comparing it ---
-                # This simulates the color information loss and makes the comparison fair.
-                # We do this by converting to RGB565 and immediately back to RGB.
                 new_image_binary = ui_generator.convert_image_to_rgb565(new_image)
                 quantized_new_image = ui_generator.reconstruct_image_from_rgb565(new_image_binary, new_image.width, new_image.height)
                 
-                # The diff is now calculated against the quantized version
                 success, resulting_image = manager.send_image_diff(quantized_new_image, previous_image)
                 
                 if success:
-                    # The new "previous image" is the quantized one we just used for the diff.
-                    previous_image = resulting_image 
+                    previous_image = resulting_image
                     previous_time_string = time_string
-                    
                     previous_image.save(config.STATE_IMAGE_PATH)
                     print(f"Successfully updated display. State saved to {config.STATE_IMAGE_PATH}")
                 

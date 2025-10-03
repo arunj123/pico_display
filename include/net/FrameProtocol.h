@@ -12,7 +12,9 @@ constexpr uint8_t FRAME_MAGIC = 0xAA;
 
 enum FrameType : uint8_t {
     THROUGHPUT_TEST = 0x01,
-    IMAGE_TILE      = 0x02
+    IMAGE_TILE      = 0x02,
+    TILE_ACK        = 0x03,
+    TILE_NACK       = 0x04
 };
 
 struct FrameHeader {
@@ -27,6 +29,7 @@ struct ImageTileHeader {
     uint16_t y;
     uint16_t width;
     uint16_t height;
+    uint32_t crc32;
 };
 
 // A structure to hold a complete, parsed frame

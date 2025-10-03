@@ -75,39 +75,44 @@ def _draw_info_icon(icon_type: str, size: tuple, color: tuple) -> Image.Image:
     return icon
 
 def create_ui_image(time_str: str, date_str: str, weather_info: dict | None) -> Image.Image:
+    """
+    Composes the final, polished UI with a 3-zone landscape layout.
+    """
     theme = config.get_current_theme()
     image = _draw_background(theme)
     draw = ImageDraw.Draw(image)
     
     # --- Define Layout Zones ---
-    separator_y = 155
+    separator_y = 150
     
     # --- Visual Separator ---
     draw.line([(15, separator_y), (config.LCD_WIDTH - 15, separator_y)], fill=(255,255,255,50), width=1)
     
     # =========================================================================
-    # --- Top Zone
+    # --- Top Zone (Split into Left and Right)
     # =========================================================================
     top_center_y = separator_y // 2
     
+    # --- Adjust the center point for the left column ---
+    left_center_x = 90
+    
+    right_center_x = 240
+    
     # --- Top-Left: Time and Date ---
-    left_center_x = 80 # Center of the left half
-    draw.text((left_center_x, top_center_y - 15), time_str, font=config.FONT_TIME, fill=theme["text_primary"], anchor="ms")
-    draw.text((left_center_x, top_center_y + 40), date_str, font=config.FONT_DATE, fill=theme["text_secondary"], anchor="ms")
+    draw.text((left_center_x, 65), time_str, font=config.FONT_TIME, fill=theme["text_primary"], anchor="ms")
+    draw.text((left_center_x, 110), date_str, font=config.FONT_DATE, fill=theme["text_secondary"], anchor="ms")
 
     # --- Top-Right: Weather ---
     if weather_info:
-        right_center_x = 240 # Center of the right half
-        
-        icon_size = (80, 60)
+        icon_size = (90, 70)
         icon_img = _create_weather_icon(weather_info['icon'], icon_size)
-        image.paste(icon_img, (right_center_x - icon_size[0] // 2, top_center_y - 50), icon_img)
+        image.paste(icon_img, (right_center_x - icon_size[0] // 2, top_center_y - 55), icon_img)
         
         temp_text = f"{weather_info['temperature']}°C"
         desc_text = weather_info['description']
         
         draw.text((right_center_x, top_center_y + 30), temp_text, font=config.FONT_TEMP, fill=theme["text_primary"], anchor="ms")
-        draw.text((right_center_x, top_center_y + 65), desc_text, font=config.FONT_WEATHER, fill=theme["text_secondary"], anchor="ms")
+        draw.text((right_center_x, top_center_y + 60), desc_text, font=config.FONT_WEATHER, fill=theme["text_secondary"], anchor="ms")
 
     # =========================================================================
     # --- Bottom Zone: Additional Info
@@ -116,35 +121,33 @@ def create_ui_image(time_str: str, date_str: str, weather_info: dict | None) -> 
         icon_size_small = 20
         icon_color = theme["text_secondary"]
         
-        # Define 4 columns for the bottom section
         num_cols = 4
         col_width = config.LCD_WIDTH / num_cols
         col_centers = [int(col_width * (i + 0.5)) for i in range(num_cols)]
         
-        # Y positions for icon, header, and value
-        y_pos_icon = separator_y + 28
-        y_pos_header = y_pos_icon + 18
-        y_pos_value = y_pos_header + 20
+        y_pos_icon = separator_y + 25
+        y_pos_header = y_pos_icon + 20
+        y_pos_value = y_pos_header + 22
 
-        # --- Column 1: Wind ---
+        # Col 1: Wind
         wind_icon_img = _draw_info_icon('wind', (icon_size_small, icon_size_small), icon_color)
         image.paste(wind_icon_img, (col_centers[0] - icon_size_small // 2, y_pos_icon - icon_size_small // 2), wind_icon_img)
         draw.text((col_centers[0], y_pos_header), "Wind", font=config.FONT_INFO_HEADER, fill=icon_color, anchor="ms")
         draw.text((col_centers[0], y_pos_value), f"{weather_info['windspeed']} km/h", font=config.FONT_INFO_VALUE, fill=theme["text_primary"], anchor="ms")
 
-        # --- Column 2: Humidity ---
+        # Col 2: Humidity
         humidity_icon_img = _draw_info_icon('humidity', (icon_size_small, icon_size_small), icon_color)
         image.paste(humidity_icon_img, (col_centers[1] - icon_size_small // 2, y_pos_icon - icon_size_small // 2), humidity_icon_img)
         draw.text((col_centers[1], y_pos_header), "Humidity", font=config.FONT_INFO_HEADER, fill=icon_color, anchor="ms")
         draw.text((col_centers[1], y_pos_value), f"{weather_info['humidity']}%", font=config.FONT_INFO_VALUE, fill=theme["text_primary"], anchor="ms")
 
-        # --- Column 3: Sunrise ---
+        # Col 3: Sunrise
         sunrise_icon_img = _draw_info_icon('sunrise', (icon_size_small, icon_size_small), icon_color)
         image.paste(sunrise_icon_img, (col_centers[2] - icon_size_small // 2, y_pos_icon - 5), sunrise_icon_img)
         draw.text((col_centers[2], y_pos_header), "Sunrise", font=config.FONT_INFO_HEADER, fill=icon_color, anchor="ms")
         draw.text((col_centers[2], y_pos_value), weather_info['sunrise'], font=config.FONT_INFO_VALUE, fill=theme["text_primary"], anchor="ms")
 
-        # --- Column 4: Sunset ---
+        # Col 4: Sunset
         sunset_icon_img = _draw_info_icon('sunset', (icon_size_small, icon_size_small), icon_color)
         image.paste(sunset_icon_img, (col_centers[3] - icon_size_small // 2, y_pos_icon - 5), sunset_icon_img)
         draw.text((col_centers[3], y_pos_header), "Sunset", font=config.FONT_INFO_HEADER, fill=icon_color, anchor="ms")

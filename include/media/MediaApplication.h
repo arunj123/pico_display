@@ -15,6 +15,11 @@
 
 void on_frame_received(const Frame& frame);
 
+enum class TileRxStatus {
+    NONE,
+    ACK_PENDING,
+    NACK_PENDING
+};
 
 class MediaApplication {
 public:
@@ -24,6 +29,7 @@ public:
     MediaControllerDevice& getMediaController() { return m_media_controller; }
     Drawing& getDrawing() { return m_drawing; }
     void push_tile_to_queue(const Frame& frame);
+    void set_tile_rx_status(TileRxStatus status);
 
 private:
     MediaControllerDevice m_media_controller;
@@ -43,6 +49,7 @@ private:
     // A queue for incoming image tiles
     critical_section_t m_tile_queue_crit_sec;
     std::vector<Frame> m_tile_queue;
+    volatile TileRxStatus m_tile_rx_status;
 
     // Static forwarders
     static void release_handler_forwarder(btstack_timer_source_t* ts);
