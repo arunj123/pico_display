@@ -41,7 +41,6 @@ set(COMMON_SOURCES
 )
 set(COMMON_LIBS
     pico_stdlib
-    # pico_cyw43_arch_threadsafe_background has been removed
     pico_btstack_cyw43
     pico_btstack_ble
     hardware_adc
@@ -77,19 +76,17 @@ pico_add_extra_outputs(${KEYBOARD_TARGET_NAME})
 set(MEDIA_TARGET_NAME media_app)
 add_executable(${MEDIA_TARGET_NAME}
     src/media/media_main.cpp
-    src/media/MediaControllerDevice.cpp
     src/media/MediaApplication.cpp
+    src/media/MediaControllerDevice.cpp
     src/pico/RotaryEncoder.cpp
     src/display/Display.cpp
-    src/display/Drawing.cpp
+    # src/display/Drawing.cpp has been removed as it is now a header-only template library
     src/net/TcpServer.cpp
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/hids_device.c
     ${COMMON_SOURCES}
 )
 
 # --- Link all necessary libraries for Wi-Fi + BLE ---
-# The lwip_threadsafe_background library provides everything needed for both
-# Wi-Fi (lwIP) and Bluetooth (BTstack) to coexist.
 target_link_libraries(${MEDIA_TARGET_NAME} PRIVATE 
     ${COMMON_LIBS}
     hardware_pio
@@ -111,8 +108,6 @@ target_include_directories(${MEDIA_TARGET_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/include/media
     ${CMAKE_CURRENT_LIST_DIR}/include/net
     ${CMAKE_CURRENT_BINARY_DIR}/generated/media_app_gatt_header
-    
-    # --- THE FIX: Add BOTH required lwIP include paths ---
     ${PICO_SDK_PATH}/lib/lwip/src/include 
     ${PICO_SDK_PATH}/src/rp2_common/pico_lwip/include
 )

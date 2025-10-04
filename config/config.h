@@ -5,16 +5,12 @@
 
 #include "pico/stdlib.h"
 
-// --- Wi-Fi Credentials ---
-// IMPORTANT: Replace with your network details
-#define WIFI_SSID "Add/Your/SSID"
-#define WIFI_PASSWORD "Password"
+// --- Rotary encoder Wiring ---
 constexpr uint ENCODER_PIN_A = 10;
 constexpr uint ENCODER_PIN_B = 11;
 constexpr uint ENCODER_PIN_KEY = 12;
 
 // --- Application Behavior ---
-constexpr int POLLING_INTERVAL_MS = 20; // Poll a bit faster for responsiveness
 constexpr int RELEASE_DELAY_MS = 50;
 constexpr int DEBOUNCE_DELAY_MS_KEY = 50; // A standard, robust debounce time
 constexpr int DEBOUNCE_DELAY_MS_ROTATION = 2; // Short debounce for rotation
@@ -27,5 +23,11 @@ constexpr uint DISPLAY_PIN_SDA   = 17;  // Serial Data (DIN)
 constexpr uint DISPLAY_PIN_DC    = 19;  // Data/Command (RS)
 constexpr uint DISPLAY_PIN_RESET = 18;  // Reset
 // The BL (Backlight) pin is not used for this display
+
+// The maximum number of pixels the async drawing buffer can hold.
+// A full-screen tile (320x12) is 3840 pixels. 4096 is a safe, round number.
+constexpr size_t MAX_DRAW_BUFFER_PIXELS = 4096;
+
+#include "private_config.h"
 
 #endif // CONFIG_H

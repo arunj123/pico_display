@@ -1,11 +1,15 @@
+// File: src/net/TcpServer.cpp
+
 #include "TcpServer.h"
 #include "pico/cyw43_arch.h"
 #include <cstdio>
 #include <cstring>
+#include <algorithm> // For std::min
 
+// Global instance pointer for static lwIP callbacks
 static TcpServer* g_tcp_server_instance = nullptr;
 
-// --- lwIP Callback Implementations (mostly unchanged) ---
+// --- lwIP Callback Implementations ---
 err_t TcpServer::tcp_accept_callback(void *arg, struct tcp_pcb *newpcb, err_t err) {
     if (newpcb == nullptr) return ERR_VAL;
     printf("TCP Client Connected\n");
@@ -34,51 +38,51 @@ void TcpServer::tcp_err_callback(void *arg, err_t err) {
     }
 }
 
-// --- NEW Frame Parsing Logic ---
+// --- Frame Parsing Logic ---
 void TcpServer::_parse_buffer() {
     bool processed_frame;
     do {
         processed_frame = false;
+        const uint8_t* buf_ptr = m_rx_buffer.data();
+        size_t buf_len = m_rx_buffer_len;
+
         switch (m_parser_state) {
             case ParserState::WAITING_FOR_MAGIC:
-                if (!m_rx_buffer.empty()) {
-                    if (m_rx_buffer[0] == FRAME_MAGIC) {
+                if (buf_len > 0) {
+                    if (buf_ptr[0] == Protocol::FRAME_MAGIC) {
                         m_parser_state = ParserState::WAITING_FOR_HEADER;
                     } else {
-                        // Not a magic byte, discard it and keep searching
-                        m_rx_buffer.erase(m_rx_buffer.begin());
+                        // Not a magic byte, discard it
+                        memmove(m_rx_buffer.data(), m_rx_buffer.data() + 1, buf_len - 1);
+                        m_rx_buffer_len--;
                     }
                 }
                 break;
 
             case ParserState::WAITING_FOR_HEADER:
-                if (m_rx_buffer.size() >= sizeof(FrameHeader)) {
-                    memcpy(&m_current_header, m_rx_buffer.data(), sizeof(FrameHeader));
+                if (buf_len >= sizeof(Protocol::FrameHeader)) {
+                    memcpy(&m_current_header, buf_ptr, sizeof(Protocol::FrameHeader));
                     m_parser_state = ParserState::WAITING_FOR_PAYLOAD;
                 }
                 break;
 
             case ParserState::WAITING_FOR_PAYLOAD:
-                if (m_rx_buffer.size() >= sizeof(FrameHeader) + m_current_header.payload_length) {
-                    Frame frame;
-                    frame.header = m_current_header;
-                    frame.payload.assign(m_rx_buffer.begin() + sizeof(FrameHeader), 
-                                         m_rx_buffer.begin() + sizeof(FrameHeader) + frame.header.payload_length);
-
+                size_t frame_len = sizeof(Protocol::FrameHeader) + m_current_header.payload_length;
+                if (buf_len >= frame_len) {
                     if (m_receive_callback) {
-                        m_receive_callback(frame);
+                        m_receive_callback(m_app_context, buf_ptr, frame_len);
                     }
                     
                     // Remove the processed frame from the buffer
-                    m_rx_buffer.erase(m_rx_buffer.begin(), 
-                                      m_rx_buffer.begin() + sizeof(FrameHeader) + frame.header.payload_length);
+                    memmove(m_rx_buffer.data(), m_rx_buffer.data() + frame_len, buf_len - frame_len);
+                    m_rx_buffer_len -= frame_len;
                     
                     m_parser_state = ParserState::WAITING_FOR_MAGIC;
-                    processed_frame = true; // Indicate we might have another full frame in the buffer
+                    processed_frame = true;
                 }
                 break;
         }
-    } while (processed_frame && !m_rx_buffer.empty());
+    } while (processed_frame && m_rx_buffer_len > 0);
 }
 
 err_t TcpServer::_recv_callback(struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
@@ -93,25 +97,25 @@ err_t TcpServer::_recv_callback(struct tcp_pcb *tpcb, struct pbuf *p, err_t err)
     cyw43_arch_lwip_check();
 
     if (p->tot_len > 0) {
-        // Copy data from the pbuf chain to our application's buffer
-        for (struct pbuf *q = p; q != nullptr; q = q->next) {
-            m_rx_buffer.insert(m_rx_buffer.end(), (uint8_t*)q->payload, (uint8_t*)q->payload + q->len);
+        size_t free_space = RX_BUFFER_SIZE - m_rx_buffer_len;
+        size_t copy_len = std::min((size_t)p->tot_len, free_space);
+
+        if (copy_len < p->tot_len) {
+            printf("TCP RX Buffer Overflow! Discarding data.\n");
         }
-        // Tell lwIP we have processed the data from the TCP window
+        
+        if (copy_len > 0) {
+            pbuf_copy_partial(p, m_rx_buffer.data() + m_rx_buffer_len, copy_len, 0);
+            m_rx_buffer_len += copy_len;
+        }
+
         tcp_recved(tpcb, p->tot_len);
     }
-    
-    // ALWAYS free the pbuf after we are done with it.
-    // This was the source of the memory leak.
     pbuf_free(p);
-
-    // Now, attempt to parse any complete frames from our application buffer
     _parse_buffer();
-
     return ERR_OK;
 }
 
-// ... _close_client_connection is mostly unchanged ...
 void TcpServer::_close_client_connection() {
     if (m_client_pcb != nullptr) {
         tcp_arg(m_client_pcb, nullptr);
@@ -119,13 +123,13 @@ void TcpServer::_close_client_connection() {
         tcp_err(m_client_pcb, nullptr);
         tcp_close(m_client_pcb);
         m_client_pcb = nullptr;
-        m_rx_buffer.clear();
+        m_rx_buffer_len = 0; // Reset buffer length
         m_parser_state = ParserState::WAITING_FOR_MAGIC; // Reset parser state
     }
 }
 
 // --- Class Methods ---
-TcpServer::TcpServer() {
+TcpServer::TcpServer(MediaApplication* app) : m_app_context(app) {
     g_tcp_server_instance = this;
 }
 
@@ -142,27 +146,31 @@ bool TcpServer::init(uint16_t port) {
     return true;
 }
 
-void TcpServer::setReceiveCallback(tcp_frame_receive_callback_t callback) {
+void TcpServer::setReceiveCallback(tcp_receive_callback_t callback) {
     m_receive_callback = callback;
 }
 
-// New method to send a framed response
-err_t TcpServer::send_frame(FrameType type, const std::vector<uint8_t>& payload) {
+err_t TcpServer::send_frame(Protocol::FrameType type, const uint8_t* payload, uint16_t len) {
     if (m_client_pcb == nullptr) return ERR_CONN;
 
-    std::vector<uint8_t> frame_data;
-    FrameHeader header = {FRAME_MAGIC, type, (uint16_t)payload.size()};
+    Protocol::FrameHeader header = {Protocol::FRAME_MAGIC, type, len};
     
-    frame_data.resize(sizeof(FrameHeader) + payload.size());
-    memcpy(frame_data.data(), &header, sizeof(FrameHeader));
-    memcpy(frame_data.data() + sizeof(FrameHeader), payload.data(), payload.size());
-    
-    err_t err = tcp_write(m_client_pcb, frame_data.data(), frame_data.size(), TCP_WRITE_FLAG_COPY);
+    // First, try to write the header
+    err_t err = tcp_write(m_client_pcb, &header, sizeof(header), TCP_WRITE_FLAG_COPY | TCP_WRITE_FLAG_MORE);
     if (err != ERR_OK) {
-        printf("Failed to write to TCP stream (err %d)\n", err);
+        printf("Failed to write TCP header (err %d)\n", err);
         return err;
     }
 
+    // Then, write the payload
+    if (len > 0 && payload != nullptr) {
+        err = tcp_write(m_client_pcb, payload, len, TCP_WRITE_FLAG_COPY);
+        if (err != ERR_OK) {
+            printf("Failed to write TCP payload (err %d)\n", err);
+            return err;
+        }
+    }
+    
     err = tcp_output(m_client_pcb);
     if (err != ERR_OK) {
         printf("Failed to output TCP data (err %d)\n", err);

@@ -10,7 +10,6 @@
 #include <cstdio>
 #include "pico/cyw43_arch.h"
 #include "lwip/ip4_addr.h"
-#include "FrameProtocol.h"
 #include "pico/stdlib.h"
 
 
@@ -79,69 +78,42 @@ uint32_t calculate_crc32(const uint8_t *data, size_t length) {
     }
     return crc ^ 0xffffffff;
 }
+// --- End CRC32 ---
 
+// Global instance pointer for the callback
 MediaApplication* g_app_instance = nullptr;
 
-namespace Colors {
-    constexpr uint16_t BLACK = 0x0000;
-    constexpr uint16_t RED   = 0xF800;
-    constexpr uint16_t WHITE = 0xFFFF;
-    constexpr uint16_t GREEN = 0x07E0;
-}
-
-// Add this function near the top of the file, after the includes.
-void debug_print_gpio_status(uint gpio) {
-    printf("--- GPIO %d Status ---\n", gpio);
+// The global callback that TcpServer invokes. It then calls a member function.
+void on_frame_received_callback(MediaApplication* app, const uint8_t* data, size_t len) {
+    if (!app || len < sizeof(Protocol::FrameHeader)) return;
     
-    // Get the function select
-    printf("  Function: %d (SIO=%d)\n", gpio_get_function(gpio), GPIO_FUNC_SIO);
+    Protocol::FrameHeader header;
+    memcpy(&header, data, sizeof(header));
+    const uint8_t* payload = data + sizeof(header);
     
-    // Get pull-up/pull-down status
-    printf("  Pull Up: %d, Pull Down: %d\n", gpio_is_pulled_up(gpio), gpio_is_pulled_down(gpio));
-
-    // Get interrupt enabled status for this core
-    io_bank0_irq_ctrl_hw_t *irq_ctrl_base = &io_bank0_hw->proc0_irq_ctrl;
-    uint32_t events = (irq_ctrl_base->inte[gpio / 8] >> (4 * (gpio % 8))) & 0xf;
-    
-    printf("  IRQ Enabled (This Core):\n");
-    printf("    LEVEL_LOW:  %d\n", (events & GPIO_IRQ_LEVEL_LOW) ? 1 : 0);
-    printf("    LEVEL_HIGH: %d\n", (events & GPIO_IRQ_LEVEL_HIGH) ? 1 : 0);
-    printf("    EDGE_FALL:  %d\n", (events & GPIO_IRQ_EDGE_FALL) ? 1 : 0);
-    printf("    EDGE_RISE:  %d\n", (events & GPIO_IRQ_EDGE_RISE) ? 1 : 0);
-    printf("--------------------\n");
-}
-
-// This is the interrupt-context code. It does the bare minimum.
-void on_frame_received(const Frame& frame) {
-    if (!g_app_instance) return;
-
-    if (frame.header.type == IMAGE_TILE) {
-        printf("DEBUG: ISR received a tile frame.\n");
-        ImageTileHeader tile_header;
-        memcpy(&tile_header, frame.payload.data(), sizeof(ImageTileHeader));
-        const uint8_t* pixel_data_bytes = frame.payload.data() + sizeof(ImageTileHeader);
-        size_t pixel_data_len = frame.header.payload_length - sizeof(ImageTileHeader);
-        uint32_t calculated_crc = calculate_crc32(pixel_data_bytes, pixel_data_len);
-
-        if (calculated_crc == tile_header.crc32) {
-            printf("DEBUG: CRC OK. Pushing tile (%dx%d at %d,%d) to queue.\n", tile_header.width, tile_header.height, tile_header.x, tile_header.y);
-            g_app_instance->push_tile_to_queue(frame);
-        } else {
-            printf("!!! CHECKSUM MISMATCH !!! Host: 0x%08lX, Pico: 0x%08lX\n", tile_header.crc32, calculated_crc);
-            g_app_instance->set_tile_rx_status(TileRxStatus::NACK_PENDING);
-        }
+    if (header.type == Protocol::FrameType::IMAGE_TILE) {
+        if (header.payload_length < sizeof(Protocol::ImageTileHeader)) return;
+        
+        Protocol::ImageTileHeader tile_header;
+        memcpy(&tile_header, payload, sizeof(tile_header));
+        
+        const uint8_t* pixel_data = payload + sizeof(tile_header);
+        size_t pixel_len = header.payload_length - sizeof(tile_header);
+        
+        app->on_image_tile_received(tile_header, pixel_data, pixel_len);
     }
 }
 
-// In the MediaApplication constructor
+// In the constructor
 MediaApplication::MediaApplication() : 
     m_encoder(ENCODER_PIN_A, ENCODER_PIN_B, ENCODER_PIN_KEY),
     m_display(pio1, DISPLAY_PIN_SDA, DISPLAY_PIN_SCL, DISPLAY_PIN_CS, DISPLAY_PIN_DC, DISPLAY_PIN_RESET, DisplayOrientation::LANDSCAPE),
     m_drawing(m_display),
+    m_tcp_server(this), // Pass self-pointer to TcpServer
     m_battery_level(100),
     m_button_state(ButtonState::IDLE),
     m_button_armed_time_us(0),
-    m_tile_rx_status(TileRxStatus::NONE)
+    m_last_draw_status(Drawing<MAX_DRAW_BUFFER_PIXELS>::DrawStatus::IDLE)
 {
     g_app_instance = this;
 
@@ -154,19 +126,43 @@ MediaApplication::MediaApplication() :
     BtStackManager::getInstance().registerHandler(&m_media_controller);
 
     critical_section_init(&m_tile_queue_crit_sec);
-    m_tcp_server.setReceiveCallback(on_frame_received);
+    m_tcp_server.setReceiveCallback(on_frame_received_callback);
 }
 
-void MediaApplication::set_tile_rx_status(TileRxStatus status) {
-    critical_section_enter_blocking(&m_tile_queue_crit_sec);
-    m_tile_rx_status = status;
-    critical_section_exit(&m_tile_queue_crit_sec);
+// --- Strongly-typed handler for Image Tiles ---
+void MediaApplication::on_image_tile_received(const Protocol::ImageTileHeader& header, const uint8_t* pixel_data, size_t pixel_len) {
+    uint32_t calculated_crc = calculate_crc32(pixel_data, pixel_len);
+
+    if (calculated_crc == header.crc32) {
+        printf("DEBUG: CRC OK. Pushing tile (%dx%d at %d,%d) to queue.\n", header.width, header.height, header.x, header.y);
+        
+        Protocol::Frame frame;
+        frame.header.magic = Protocol::FRAME_MAGIC;
+        frame.header.type = Protocol::FrameType::IMAGE_TILE;
+        frame.header.payload_length = sizeof(header) + pixel_len;
+        
+        // Ensure we don't overflow the fixed-size payload buffer
+        size_t payload_to_copy = std::min((size_t)frame.header.payload_length, frame.payload.size());
+
+        memcpy(frame.payload.data(), &header, sizeof(header));
+        memcpy(frame.payload.data() + sizeof(header), pixel_data, payload_to_copy - sizeof(header));
+        
+        push_tile_to_queue(frame);
+    } else {
+        printf("!!! CHECKSUM MISMATCH !!! Host: 0x%08lX, Pico: 0x%08lX\n", header.crc32, calculated_crc);
+        m_tcp_server.send_frame(Protocol::FrameType::TILE_NACK, nullptr, 0);
+    }
 }
 
-// --- Add the thread-safe queue push method ---
-void MediaApplication::push_tile_to_queue(const Frame& frame) {
+void MediaApplication::push_tile_to_queue(const Protocol::Frame& frame) {
     critical_section_enter_blocking(&m_tile_queue_crit_sec);
-    m_tile_queue.push_back(frame);
+    if (m_queue_count < TILE_QUEUE_SIZE) {
+        m_tile_queue[m_queue_head] = frame;
+        m_queue_head = (m_queue_head + 1) % TILE_QUEUE_SIZE;
+        m_queue_count++;
+    } else {
+        printf("WARN: Tile queue overflow, dropping tile!\n");
+    }
     critical_section_exit(&m_tile_queue_crit_sec);
 }
 
@@ -176,40 +172,29 @@ void MediaApplication::run() {
     sleep_ms(50);
     m_encoder.read_and_clear_rotation();
 
-    // --- Initialize display and draw the UI here ---
     printf("Initializing Display...\n");
     m_display.init();
+    m_display.fillScreen(0); // Black
+    m_drawing.drawString(10, 10, "Connecting to Wi-Fi...", 0xFFFF, &font_freesans_16);
     
-    m_display.fillScreen(Colors::BLACK);
-    m_drawing.fillRect(10, 10, m_drawing.getWidth() - 20, 30, Colors::RED);
-    m_drawing.drawRect(9, 9, m_drawing.getWidth() - 18, 32, Colors::WHITE);
-    m_drawing.drawImageBlocking(
-        (m_drawing.getWidth() - test_img_width) / 2,
-        (m_drawing.getHeight() - test_img_height) / 2,
-        test_img_width,
-        test_img_height,
-        test_img_data
-    );
-    m_drawing.drawString(20, 20, "Hello, Display!", Colors::WHITE, &font_freesans_16);
-    m_drawing.drawLine(20, 50, 300, 50, Colors::GREEN);
-    
-    // --- End of new display code ---
-
     cyw43_arch_enable_sta_mode();
     printf("Connecting to Wi-Fi network: %s\n", WIFI_SSID);
 
     if (cyw43_arch_wifi_connect_timeout_ms(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_AES_PSK, 30000)) {
         printf("Failed to connect to Wi-Fi.\n");
+        m_drawing.fillRect(10, 10, 300, 20, 0);
+        m_drawing.drawString(10, 10, "Wi-Fi connection failed.", 0xF800, &font_freesans_16);
     } else {
         printf("Connected to Wi-Fi. IP: %s\n", ip4addr_ntoa(netif_ip4_addr(&cyw43_state.netif[0])));
         m_tcp_server.init(4242);
+        m_drawing.fillRect(10, 10, 300, 20, 0);
+        m_drawing.drawString(10, 10, "Waiting for host...", 0x07E0, &font_freesans_16);
     }
     
     printf("Initializing BTstack...\n");
     m_media_controller.setup();
     m_media_controller.powerOn();
     
-    // Start the battery timer (low frequency, safe)
     btstack_run_loop_set_timer(&m_battery_timer, 30000);
     btstack_run_loop_add_timer(&m_battery_timer);
 
@@ -267,46 +252,40 @@ void MediaApplication::run() {
                     break;
             }
         }
-
+        
         // 2. Drive the non-blocking drawing engine and TCP logic
-        Drawing::DrawStatus current_draw_status = m_drawing.processDrawing();
+        auto current_draw_status = m_drawing.processDrawing();
 
-        // Has a drawing job JUST completed on this loop iteration?
-        if (m_last_draw_status == Drawing::BUSY && current_draw_status == Drawing::IDLE) {
-            // If yes, our only job this iteration is to send the ACK.
-            // The 'else if' will prevent us from immediately starting a new job.
-            m_tcp_server.send_frame(TILE_ACK, {});
+        if (m_last_draw_status == Drawing<MAX_DRAW_BUFFER_PIXELS>::DrawStatus::BUSY && current_draw_status == Drawing<MAX_DRAW_BUFFER_PIXELS>::DrawStatus::IDLE) {
+            printf("DEBUG: Drawing finished. Sending ACK.\n");
+            m_tcp_server.send_frame(Protocol::FrameType::TILE_ACK, nullptr, 0);
         } 
-        // OTHERWISE, if the engine is idle, are we free to start a NEW job?
-        else if (current_draw_status == Drawing::IDLE) {
-            Frame new_tile_to_draw;
+        else if (current_draw_status == Drawing<MAX_DRAW_BUFFER_PIXELS>::DrawStatus::IDLE) {
             bool has_new_tile = false;
+            Protocol::Frame new_tile_to_draw;
 
-            // Check if a tile has arrived from the network
             critical_section_enter_blocking(&m_tile_queue_crit_sec);
-            if (!m_tile_queue.empty()) {
+            if (m_queue_count > 0) {
                 has_new_tile = true;
-                new_tile_to_draw = m_tile_queue.front();
-                m_tile_queue.erase(m_tile_queue.begin());
+                new_tile_to_draw = m_tile_queue[m_queue_tail];
+                m_queue_tail = (m_queue_tail + 1) % TILE_QUEUE_SIZE;
+                m_queue_count--;
             }
             critical_section_exit(&m_tile_queue_crit_sec);
 
-            // If we have a new tile, start the asynchronous drawing operation
             if (has_new_tile) {
-                ImageTileHeader tile_header;
-                memcpy(&tile_header, new_tile_to_draw.payload.data(), sizeof(ImageTileHeader));
+                printf("DEBUG: Dequeued tile. Starting async draw.\n");
+                Protocol::ImageTileHeader tile_header;
+                memcpy(&tile_header, new_tile_to_draw.payload.data(), sizeof(tile_header));
+                
                 const uint16_t* pixel_data = reinterpret_cast<const uint16_t*>(
-                    new_tile_to_draw.payload.data() + sizeof(ImageTileHeader)
+                    new_tile_to_draw.payload.data() + sizeof(tile_header)
                 );
                 
-                // This call returns immediately
                 m_drawing.drawImageAsync(tile_header.x, tile_header.y, tile_header.width, tile_header.height, pixel_data);
             }
         }
-
-        // IMPORTANT: Update the status for the *next* loop iteration
         m_last_draw_status = current_draw_status;
-
     }
 }
 
