@@ -3,6 +3,7 @@ import os
 from PIL import ImageFont
 import struct
 from datetime import datetime
+from random import randrange
 
 # -- Device & Network Configuration --
 PICO_IP = "192.168.0.122"
@@ -47,7 +48,12 @@ except IOError:
 # -- UI Color Theme --
 def get_current_theme():
     """Selects a color theme based on the current hour of the day."""
-    hour = datetime.now().hour
+    # hour = datetime.now().hour
+    
+    # For testing purposes, assign a number between 0-23
+    hour = randrange(0, 24)
+    print(f"Selected hour for theme: {hour}")
+
     if 5 <= hour < 12: # Morning
         return {
             "name": "Morning Sky",

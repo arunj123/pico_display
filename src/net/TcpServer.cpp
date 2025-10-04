@@ -1,15 +1,20 @@
 // File: src/net/TcpServer.cpp
 
 #include "TcpServer.h"
+#include "MediaApplication.h"
 #include "pico/cyw43_arch.h"
 #include <cstdio>
 #include <cstring>
-#include <algorithm> // For std::min
+#include <algorithm>
 
-// Global instance pointer for static lwIP callbacks
 static TcpServer* g_tcp_server_instance = nullptr;
 
-// --- lwIP Callback Implementations ---
+TcpServer::TcpServer(MediaApplication* app) : m_app_context(app) {
+    g_tcp_server_instance = this;
+    critical_section_init(&m_pbuf_queue_crit_sec);
+}
+
+// --- Static Callbacks ---
 err_t TcpServer::tcp_accept_callback(void *arg, struct tcp_pcb *newpcb, err_t err) {
     if (newpcb == nullptr) return ERR_VAL;
     printf("TCP Client Connected\n");
@@ -38,82 +43,94 @@ void TcpServer::tcp_err_callback(void *arg, err_t err) {
     }
 }
 
-// --- Frame Parsing Logic ---
-void TcpServer::_parse_buffer() {
-    bool processed_frame;
-    do {
-        processed_frame = false;
-        const uint8_t* buf_ptr = m_rx_buffer.data();
-        size_t buf_len = m_rx_buffer_len;
-
-        switch (m_parser_state) {
-            case ParserState::WAITING_FOR_MAGIC:
-                if (buf_len > 0) {
-                    if (buf_ptr[0] == Protocol::FRAME_MAGIC) {
-                        m_parser_state = ParserState::WAITING_FOR_HEADER;
-                    } else {
-                        // Not a magic byte, discard it
-                        memmove(m_rx_buffer.data(), m_rx_buffer.data() + 1, buf_len - 1);
-                        m_rx_buffer_len--;
-                    }
-                }
-                break;
-
-            case ParserState::WAITING_FOR_HEADER:
-                if (buf_len >= sizeof(Protocol::FrameHeader)) {
-                    memcpy(&m_current_header, buf_ptr, sizeof(Protocol::FrameHeader));
-                    m_parser_state = ParserState::WAITING_FOR_PAYLOAD;
-                }
-                break;
-
-            case ParserState::WAITING_FOR_PAYLOAD:
-                size_t frame_len = sizeof(Protocol::FrameHeader) + m_current_header.payload_length;
-                if (buf_len >= frame_len) {
-                    if (m_receive_callback) {
-                        m_receive_callback(m_app_context, buf_ptr, frame_len);
-                    }
-                    
-                    // Remove the processed frame from the buffer
-                    memmove(m_rx_buffer.data(), m_rx_buffer.data() + frame_len, buf_len - frame_len);
-                    m_rx_buffer_len -= frame_len;
-                    
-                    m_parser_state = ParserState::WAITING_FOR_MAGIC;
-                    processed_frame = true;
-                }
-                break;
-        }
-    } while (processed_frame && m_rx_buffer_len > 0);
-}
-
+// THE ISR: This is the ONLY code that runs in the interrupt context.
 err_t TcpServer::_recv_callback(struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
-    // If p is NULL, the connection has been closed.
     if (p == nullptr) {
-        printf("TCP Client disconnected.\n");
         _close_client_connection();
         return ERR_OK;
     }
 
-    // This method is called from an interrupt, so lock the scheduler
-    cyw43_arch_lwip_check();
+    critical_section_enter_blocking(&m_pbuf_queue_crit_sec);
+    if (m_pbuf_queue_count < PBUF_QUEUE_SIZE) {
+        m_pbuf_queue[m_pbuf_queue_head] = p;
+        m_pbuf_queue_head = (m_pbuf_queue_head + 1) % PBUF_QUEUE_SIZE;
+        m_pbuf_queue_count++;
+    } else {
+        printf("ERROR: pbuf queue overflow! Discarding packet.\n");
+        pbuf_free(p);
+    }
+    critical_section_exit(&m_pbuf_queue_crit_sec);
+    
+    return ERR_OK;
+}
 
-    if (p->tot_len > 0) {
-        size_t free_space = RX_BUFFER_SIZE - m_rx_buffer_len;
-        size_t copy_len = std::min((size_t)p->tot_len, free_space);
+// THE MAIN LOOP PUMP: Called repeatedly from the application's main loop.
+void TcpServer::poll() {
+    struct pbuf* p = nullptr;
+    
+    critical_section_enter_blocking(&m_pbuf_queue_crit_sec);
+    if (m_pbuf_queue_count > 0) {
+        p = m_pbuf_queue[m_pbuf_queue_tail];
+        m_pbuf_queue_tail = (m_pbuf_queue_tail + 1) % PBUF_QUEUE_SIZE;
+        m_pbuf_queue_count--;
+    }
+    critical_section_exit(&m_pbuf_queue_crit_sec);
 
-        if (copy_len < p->tot_len) {
-            printf("TCP RX Buffer Overflow! Discarding data.\n");
+    if (p != nullptr) {
+        cyw43_arch_lwip_check();
+        
+        if (p->tot_len > 0) {
+            size_t free_space = RX_BUFFER_SIZE - m_rx_head;
+            if (p->tot_len > free_space) {
+                printf("ERROR: TCP stream buffer would overflow. Discarding data.\n");
+            } else {
+                pbuf_copy_partial(p, m_rx_buffer.data() + m_rx_head, p->tot_len, 0);
+                m_rx_head += p->tot_len;
+            }
         }
         
-        if (copy_len > 0) {
-            pbuf_copy_partial(p, m_rx_buffer.data() + m_rx_buffer_len, copy_len, 0);
-            m_rx_buffer_len += copy_len;
+        tcp_recved(m_client_pcb, p->tot_len);
+        pbuf_free(p);
+        
+        _process_stream_buffer();
+    }
+}
+
+// The stream parser, now safely running in the main loop context via poll().
+void TcpServer::_process_stream_buffer() {
+    bool processed_frame;
+    do {
+        processed_frame = false;
+        size_t data_len = m_rx_head - m_rx_tail;
+
+        if (data_len < sizeof(Protocol::FrameHeader)) break;
+
+        Protocol::FrameHeader header;
+        memcpy(&header, m_rx_buffer.data() + m_rx_tail, sizeof(header));
+
+        if (header.magic != Protocol::FRAME_MAGIC) {
+            printf("ERROR: Bad magic byte. Searching...\n");
+            m_rx_tail++;
+            processed_frame = true;
+            continue;
         }
 
-        tcp_recved(tpcb, p->tot_len);
+        size_t frame_len = sizeof(header) + header.payload_length;
+        if (data_len < frame_len) break;
+
+        if (m_dispatch_callback) {
+            m_dispatch_callback(m_app_context, m_rx_buffer.data() + m_rx_tail, frame_len);
+        }
+
+        m_rx_tail += frame_len;
+        processed_frame = true;
+
+    } while (processed_frame);
+
+    if (m_rx_head > 0 && m_rx_head == m_rx_tail) {
+        m_rx_head = 0;
+        m_rx_tail = 0;
     }
-    pbuf_free(p);
-    _parse_buffer();
-    return ERR_OK;
 }
 
 void TcpServer::_close_client_connection() {
@@ -123,14 +140,17 @@ void TcpServer::_close_client_connection() {
         tcp_err(m_client_pcb, nullptr);
         tcp_close(m_client_pcb);
         m_client_pcb = nullptr;
-        m_rx_buffer_len = 0; // Reset buffer length
-        m_parser_state = ParserState::WAITING_FOR_MAGIC; // Reset parser state
+        m_rx_head = 0;
+        m_rx_tail = 0;
+        critical_section_enter_blocking(&m_pbuf_queue_crit_sec);
+        while(m_pbuf_queue_count > 0) {
+            struct pbuf* p = m_pbuf_queue[m_pbuf_queue_tail];
+            m_pbuf_queue_tail = (m_pbuf_queue_tail + 1) % PBUF_QUEUE_SIZE;
+            m_pbuf_queue_count--;
+            pbuf_free(p);
+        }
+        critical_section_exit(&m_pbuf_queue_crit_sec);
     }
-}
-
-// --- Class Methods ---
-TcpServer::TcpServer(MediaApplication* app) : m_app_context(app) {
-    g_tcp_server_instance = this;
 }
 
 bool TcpServer::init(uint16_t port) {
@@ -145,35 +165,5 @@ bool TcpServer::init(uint16_t port) {
     printf("TCP Server initialized and listening on port %d\n", port);
     return true;
 }
-
-void TcpServer::setReceiveCallback(tcp_receive_callback_t callback) {
-    m_receive_callback = callback;
-}
-
-err_t TcpServer::send_frame(Protocol::FrameType type, const uint8_t* payload, uint16_t len) {
-    if (m_client_pcb == nullptr) return ERR_CONN;
-
-    Protocol::FrameHeader header = {Protocol::FRAME_MAGIC, type, len};
-    
-    // First, try to write the header
-    err_t err = tcp_write(m_client_pcb, &header, sizeof(header), TCP_WRITE_FLAG_COPY | TCP_WRITE_FLAG_MORE);
-    if (err != ERR_OK) {
-        printf("Failed to write TCP header (err %d)\n", err);
-        return err;
-    }
-
-    // Then, write the payload
-    if (len > 0 && payload != nullptr) {
-        err = tcp_write(m_client_pcb, payload, len, TCP_WRITE_FLAG_COPY);
-        if (err != ERR_OK) {
-            printf("Failed to write TCP payload (err %d)\n", err);
-            return err;
-        }
-    }
-    
-    err = tcp_output(m_client_pcb);
-    if (err != ERR_OK) {
-        printf("Failed to output TCP data (err %d)\n", err);
-    }
-    return err;
-}
+void TcpServer::setReceiveCallback(tcp_frame_dispatch_callback_t callback) { m_dispatch_callback = callback; }
+// err_t TcpServer::send_frame(Protocol::FrameType type, const uint8_t* payload, uint16_t len) { return ERR_OK; }

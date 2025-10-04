@@ -80,7 +80,6 @@ add_executable(${MEDIA_TARGET_NAME}
     src/media/MediaControllerDevice.cpp
     src/pico/RotaryEncoder.cpp
     src/display/Display.cpp
-    # src/display/Drawing.cpp has been removed as it is now a header-only template library
     src/net/TcpServer.cpp
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/hids_device.c
     ${COMMON_SOURCES}

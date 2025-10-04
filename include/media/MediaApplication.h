@@ -16,8 +16,6 @@
 
 class MediaApplication; // Forward declaration
 
-// The global callback that TcpServer will use
-void on_frame_received_callback(MediaApplication* app, const uint8_t* data, size_t len);
 
 class MediaApplication {
 public:
@@ -28,9 +26,6 @@ public:
     void on_image_tile_received(const Protocol::ImageTileHeader& header, const uint8_t* pixel_data, size_t pixel_len);
 
 private:
-    // Helper to push a validated frame into our private queue
-    void push_tile_to_queue(const Protocol::Frame& frame);
-
     MediaControllerDevice m_media_controller;
     RotaryEncoder m_encoder;
     St7789Display m_display;
@@ -50,13 +45,14 @@ private:
     
     Drawing<MAX_DRAW_BUFFER_PIXELS>::DrawStatus m_last_draw_status;
 
-    // A fixed-size circular buffer for incoming image tiles
-    critical_section_t m_tile_queue_crit_sec;
-    static constexpr size_t TILE_QUEUE_SIZE = 4;
-    std::array<Protocol::Frame, TILE_QUEUE_SIZE> m_tile_queue;
-    uint8_t m_queue_head = 0;
-    uint8_t m_queue_tail = 0;
-    uint8_t m_queue_count = 0;
+    // --- Flag for deferred NACK sending ---
+    bool m_nack_is_pending = false;
+
+    // The queue now only needs to hold ONE tile, as TCP flow control
+    // will prevent more from arriving until we are ready.
+    critical_section_t m_tile_buffer_crit_sec;
+    bool m_tile_is_pending = false;
+    Protocol::Frame m_pending_tile;
 
     static void release_handler_forwarder(btstack_timer_source_t* ts);
     static void battery_timer_handler_forwarder(btstack_timer_source_t* ts);
