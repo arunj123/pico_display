@@ -5,7 +5,7 @@ This project transforms a Raspberry Pi Pico W into a versatile, multi-function d
 1.  **Advanced Media Controller (`media_app`):** The flagship application. It's a BLE Human Interface Device (HID) with a rotary encoder for media control, which also connects to your local Wi-Fi to receive data from a host application. It then renders a beautiful, real-time weather and clock display on a color LCD.
 2.  **Classic BLE Keyboard (`keyboard_app`):** A more traditional firmware that turns the Pico W into a simple wireless keyboard.
 
-The project is architected in C++ for performance and clarity, heavily leveraging the Pico's unique Programmable I/O (PIO) and demonstrating a robust cooperative multitasking approach to handle Bluetooth, Wi-Fi, and hardware interrupts simultaneously.
+The project is architected in C++ for performance and clarity, heavily leveraging the Pico's unique Programmable I/O (PIO) and demonstrating a robust cooperative multitasking approach to handle Bluetooth, Wi-Fi, and real-time hardware interrupts simultaneously.
 
 ## Features
 
@@ -36,11 +36,11 @@ A Python application designed to run on a networked computer (like a Raspberry P
 *   **Live Data Fetching:** Periodically pulls real-time weather data from the Open-Meteo API.
 *   **Advanced UI Generation:** Creates a polished, aesthetically pleasing UI image using the Pillow library, complete with colorful, programmatically drawn weather icons.
 *   **Efficient "Diff & Tile" Algorithm:**
-    *   To minimize network traffic and prevent screen flicker, the script compares the newly generated UI with the last frame sent.
-    *   It calculates the smallest rectangular "bounding box" that contains all the changed pixels (a "diff").
-    *   If this diff is larger than the 8KB TCP payload limit, it is automatically broken down into smaller "tiles."
-    *   Only the necessary tiles are sent to the Pico W. This is extremely efficient for updates like the clock changing, where only a small part of the screen needs to be redrawn.
-*   **Reliable TCP Communication:** Uses a custom, framed TCP protocol to send image tiles to the Pico W.
+    *   To minimize network traffic, the script compares the newly generated UI with the last frame sent and calculates the smallest rectangular "bounding box" of changed pixels.
+    *   This "diff" is broken down into smaller "tiles" to fit within a reasonable payload size.
+*   **Reliable TCP Communication with ACK-based Flow Control:**
+    *   Uses a custom, framed TCP protocol to send image tiles to the Pico W.
+    *   To ensure stability, the script sends only one tile at a time and waits for an "ACK" (acknowledgment) packet from the Pico before sending the next. This prevents the host from overwhelming the Pico's limited buffers.
 
 ### 3. BLE Keyboard (`keyboard_app`)
 
@@ -86,13 +86,30 @@ A more traditional HID implementation that turns the Pico W into a wireless keyb
 
 ### Firmware (C++)
 
-*   **Cooperative Multitasking:** The `media_app` must handle three asynchronous tasks: Bluetooth events, Wi-Fi/TCP events, and user input. The core design decision was to use a single, non-blocking main `while(true)` loop in `MediaApplication::run()`. This loop is paced by the `cyw43_arch_wait_for_work_until()` function, which efficiently yields CPU time, allowing both the BTstack and lwIP networking stacks to process their background tasks without conflict. This avoids the panics and instability that arise from attempting to use blocking calls within different interrupt contexts.
+*   **Cooperative Multitasking:** The `media_app` must handle three asynchronous tasks: Bluetooth events, Wi-Fi/TCP events, and user input. The final, stable architecture is built around a single, non-blocking main `while(true)` loop in `MediaApplication::run()`. This loop is the heart of the cooperative scheduler, paced by `cyw43_arch_wait_for_work_until()`. This function correctly yields CPU time to allow the BTstack (Bluetooth) and lwIP (Networking) background tasks to run without conflict, while also allowing the main thread to handle application logic safely.
 
-*   **Interrupt Handling:** The Pico W wireless driver takes ownership of the primary GPIO interrupt handler. To allow the `RotaryEncoder` to also respond to high-frequency events, it was designed to register its own **raw interrupt handler** using `gpio_add_raw_irq_handler_with_order_priority_masked`. This allows it to coexist with the wireless driver, with a high enough priority to ensure encoder clicks are not missed during Wi-Fi activity.
+*   **Correct Initialization Sequence:** A critical design element is the strict initialization order required by the Pico W SDK to prevent driver conflicts. The `MediaApplication::run()` method now enforces this order:
+    1.  Core hardware (`stdio`, `RotaryEncoder`, `Display`).
+    2.  `cyw43_arch_init()` to initialize the wireless driver stack.
+    3.  BTstack and other application software services.
+    4.  Wi-Fi connection and TCP server initialization.
+    5.  Enter the main application loop.
 
-*   **Non-Blocking TCP Server:** To prevent panics caused by calling blocking functions from an interrupt context, the `TcpServer` is designed with a **producer-consumer** pattern. The lwIP receive callback (the producer, running in an interrupt context) does the absolute minimum: it verifies the data and pushes it onto a thread-safe queue (`m_tile_queue`). The main application loop (the consumer) then safely pops from this queue and performs the slow, blocking `drawImage` operation.
+*   **High-Priority Interrupt Handling:** The Pico W's wireless driver (`cyw43`) registers a high-priority raw interrupt handler for GPIO events. To prevent this from blocking the `RotaryEncoder`, the encoder's `init()` function now explicitly registers its own raw IRQ handler with a **higher priority** (a numerically lower value, `0x30`) than the CYW43 driver's default (`0x40`). This ensures encoder events are always captured without conflicting with wireless activity.
 
-*   **PIO for Display:** The `St7789Display` driver offloads the high-speed SPI data transmission to a PIO state machine. This is a key performance optimization, as it allows the CPU to perform other tasks while the DMA and PIO work in the background to send pixel data to the screen.
+*   **Robust TCP Server with a Producer-Consumer Queue:** To solve the "fast producer, slow consumer" problem, where a fast host overwhelms the Pico, a robust producer-consumer pattern was implemented:
+    *   **The Producer (Interrupt Context):** The low-level `_recv_callback` from lwIP is the producer. It runs in an interrupt context and does the absolute minimum: it validates an incoming data frame's CRC and, if valid, places the entire frame onto a multi-slot, thread-safe ring buffer (`m_tile_queue`).
+    *   **The Consumer (Main Loop):** The `poll_handler()` function, called from the main `while(true)` loop, is the consumer. It is the only part of the code that removes items from the queue. It will only do so if the display is not busy drawing (`m_drawing.processDrawing()` returns `IDLE`).
+    *   **Flow Control:** The crucial `ACK` packet is sent by the consumer (`poll_handler`) *after* it has successfully dequeued a tile and is about to start drawing it. This provides perfect, application-level flow control, ensuring the host never sends a new tile until the Pico is truly ready for it.
+
+*   **Cooperative Display Driver:** The `St7789Display::drawBuffer` function contains a tight loop that sends thousands of pixels. To prevent this from starving the background network and Bluetooth tasks, a call to `cyw43_arch_poll()` is injected inside this loop. This periodically yields CPU time, allowing the wireless stack to process incoming data and send outgoing ACKs even during a slow screen redraw.
+
+## Limitations and Design Trade-offs
+
+*   **Cooperative, Not Preemptive:** The entire firmware runs in a cooperative, single-threaded environment. Any task that blocks for a long time without yielding (e.g., a long calculation or a driver without `cyw43_arch_poll()`) will starve all other tasks, including Bluetooth and Wi-Fi, leading to instability.
+*   **Throughput is Limited by Drawing Speed:** The ACK-based flow control makes the network transfer extremely reliable, but it also means the overall data throughput is limited by the slowest part of the consumer chain: drawing pixels to the LCD.
+*   **Memory Usage:** The tile buffer (`m_tile_queue`) and the asynchronous drawing buffer in the `Drawing` class consume RAM. While currently small, handling larger images or more buffered tiles would require careful memory management.
+*   **Interrupt Priority:** The manual management of IRQ priorities is powerful but fragile. Adding other new, low-level hardware drivers would require careful consideration of the interrupt priority chain to avoid future conflicts.
 
 ### Host Application (Python)
 
@@ -104,60 +121,35 @@ A more traditional HID implementation that turns the Pico W into a wireless keyb
 *   **Efficient Screen Updates:** The decision to implement a "diff and tile" algorithm is central to the project's performance. Instead of sending a full 150KB framebuffer every second, it sends only a few kilobytes when the time changes, making the application extremely network-efficient.
 *   **Robust Communication:** The initial design used a simple echo. This was replaced with a more robust framed protocol. When stability issues arose, an ACK/NACK flow control system was added, and finally simplified by relying on TCP's inherent reliability. The final protocol sends self-contained `IMAGE_TILE` frames, which is both simple and effective.
 
-## Building and Flashing (Firmware)
-
-This project uses the standard Raspberry Pi Pico C/C++ SDK. The recommended environment is VS Code with the official Pico extension.
-
-### Prerequisites
-
-1.  Visual Studio Code.
-2.  The official **Raspberry Pi Pico (C/C++ SDK)** extension. This will install the toolchain (compilers, CMake, etc.) for you.
-
-### Build & Flash with VS Code
-
-1.  **Open the project folder** in VS Code.
-2.  Select the **CMake** extension from the activity bar.
-3.  Choose the desired build target: `media_app` or `keyboard_app`.
-4.  Press **`F7`** to build the project.
-5.  Put your Pico W into **BOOTSEL mode** (hold the BOOTSEL button while plugging it in).
-6.  In VS Code, open the command palette (`Ctrl+Shift+P`) and run the task **"Tasks: Run Task" -> "Flash media_app (openocd)"** (or the keyboard equivalent).
-
-## Running the Host Weather Display
-
-The Python script sends the UI to your Pico W over Wi-Fi.
-
-### Prerequisites
-
-1.  **Python 3.x** installed on your computer.
-2.  Install the required libraries:
-    ```bash
-    pip install requests Pillow
-    ```
-3.  Download the required fonts (`FreeSansBold.ttf`, `Ubuntu-L.ttf`) and place them in a `fonts` sub-directory.
-
-### Configuration
-
-1.  Open `config.py`.
-2.  Set the `PICO_IP` variable to the IP address assigned to your Pico W (you can see this in the serial monitor output when it connects to Wi-Fi).
-3.  Set your `LOCATION_LAT` and `LOCATION_LON` for accurate weather.
-
-### Execution
-
-Run the main display manager script from your terminal:
-```bash
-python display_manager.py
-```
-The script will connect to your Pico W, fetch the weather, and begin sending screen updates.
-
 ## Key Problems Solved
 
-This project overcame several complex integration challenges common in embedded systems:
+This project overcame several complex integration challenges common in embedded systems. The debugging journey revealed critical insights into the Pico W's architecture:
 
-1.  **Wi-Fi and BLE Coexistence:** Solved initial panics by using the correct lwIP-aware CYW43 driver library (`pico_cyw43_arch_lwip_threadsafe_background`) and a cooperative main loop (`cyw43_arch_wait_for_work_until`).
-2.  **GPIO Interrupt Conflicts:** Resolved `Hard assert` panics by converting the `RotaryEncoder` from a simple GPIO callback to a high-priority Raw IRQ Handler, allowing it to coexist with the wireless driver's interrupt requirements.
-3.  **Concurrency Panics (`sleep in handler`):** Eliminated panics by architecting a producer-consumer pattern. The TCP receive callback (interrupt context) only pushes data to a queue, while the main application loop is the only place where slow, blocking functions (`drawImage`) are called.
-4.  **Memory Leaks (`pbuf_free`):** Fixed a subtle memory leak in the TCP server where empty packets were not being correctly freed, eventually exhausting the lwIP memory pool and causing a crash after long run times.
-5.  **Inefficient Display Updates:** Implemented an intelligent "diff and tile" algorithm in the Python host to drastically reduce network traffic, only sending the portions of the screen that have actually changed.
+1.  **Startup Deadlocks & GPIO Interrupt Conflicts:**
+    *   **Problem:** The application would hang on startup, with logs stopping after "Initializing Display...". This was caused by `cyw43_arch_init()` and `RotaryEncoder::init()` competing to register a raw GPIO interrupt handler for the same hardware IRQ (IO_IRQ_BANK0). The driver, having a higher priority, would block the encoder, causing an assertion failure or deadlock.
+    *   **Solution:** The `RotaryEncoder` was modified to register its raw IRQ handler with an explicit, higher priority (`0x30`) than the CYW43 driver's default (`0x40`). This allows the two handlers to coexist, with encoder events being processed first.
+
+2.  **`PANIC - Attempted to sleep inside of an exception handler`:**
+    *   **Problem:** An experimental architecture that moved the main application loop into a `btstack` timer caused a kernel panic. The `Display` driver uses `sleep_us()`, which is a blocking call forbidden in an interrupt context (where timers execute).
+    *   **Solution:** The architecture was reverted to the canonical Pico SDK model: a single `while(true)` loop in the main thread that drives the scheduler via `cyw43_arch_wait_for_work_until()`. This ensures all application logic, including calls to the display driver, runs in a safe, non-interrupt context.
+
+3.  **Network Instability & Buffer Overflows (The "Fast Producer, Slow Consumer" Problem):**
+    *   **Problem:** The Python host, running on a fast PC, could send TCP data far faster than the Pico could process it and draw it to the screen. This caused internal lwIP buffers, and later the application's own buffers, to overflow, leading to data corruption, checksum mismatches, and dropped connections.
+    *   **Solution:** A multi-stage, robust flow control system was implemented.
+        1.  **ACK-Based Protocol:** The Python host was modified to wait for an ACK from the Pico after sending each tile.
+        2.  **Decoupled ACK:** The `ACK` is now sent by the main loop (the consumer) only when it is ready to start drawing a new tile. This provides perfect application-level flow control.
+        3.  **Multi-Slot Queue:** A thread-safe, multi-slot ring buffer was added to hold incoming tiles, allowing the fast network ISR to queue several tiles while the main loop is busy with a slow drawing operation.
+
+4.  **Bluetooth Crashes Under Heavy Use:**
+    *   **Problem:** Rapidly turning the rotary encoder would cause a BTstack assertion failure: `btstack_run_loop_base_add_timer`. This was caused by trying to add the `m_release_timer` to the scheduler when it was already scheduled.
+    *   **Solution:** The event handling logic in `handle_encoder()` was made more robust. It now explicitly removes the timer (`btstack_run_loop_remove_timer`) before setting its new timeout and adding it back. This is the correct pattern for re-triggering an existing event timer.
+
+Old ones:
+5.  **Wi-Fi and BLE Coexistence:** Solved initial panics by using the correct lwIP-aware CYW43 driver library (`pico_cyw43_arch_lwip_threadsafe_background`) and a cooperative main loop (`cyw43_arch_wait_for_work_until`).
+6.  **GPIO Interrupt Conflicts:** Resolved `Hard assert` panics by converting the `RotaryEncoder` from a simple GPIO callback to a high-priority Raw IRQ Handler, allowing it to coexist with the wireless driver's interrupt requirements.
+7.  **Concurrency Panics (`sleep in handler`):** Eliminated panics by architecting a producer-consumer pattern. The TCP receive callback (interrupt context) only pushes data to a queue, while the main application loop is the only place where slow, blocking functions (`drawImage`) are called.
+8.  **Memory Leaks (`pbuf_free`):** Fixed a subtle memory leak in the TCP server where empty packets were not being correctly freed, eventually exhausting the lwIP memory pool and causing a crash after long run times.
+9.  **Inefficient Display Updates:** Implemented an intelligent "diff and tile" algorithm in the Python host to drastically reduce network traffic, only sending the portions of the screen that have actually changed.
 
 ### Building and Flashing with VS Code (Recommended)
 
