@@ -48,17 +48,15 @@ except IOError:
 # -- UI Color Theme --
 def get_current_theme():
     """Selects a color theme based on the current hour of the day."""
-    # hour = datetime.now().hour
+    hour = datetime.now().hour
     
     # For testing purposes, assign a number between 0-23
-    hour = randrange(0, 24)
+    # hour = randrange(0, 24)
     print(f"Selected hour for theme: {hour}")
 
     if 5 <= hour < 12: # Morning
         return {
             "name": "Morning Sky",
-            #"gradient_start": (70, 130, 180), # Light Steel Blue
-            #"gradient_end": (135, 206, 235), # Sky Blue
             "gradient_start": (0, 10, 60),      # Deep Ocean Blue
             "gradient_end": (10, 80, 140),      # Bright Cyan
             "text_primary": (255, 255, 255),
@@ -67,8 +65,8 @@ def get_current_theme():
     elif 12 <= hour < 18: # Afternoon
         return {
             "name": "Daylight",
-            "gradient_start": (0, 119, 190),  # Deep Sky Blue
-            "gradient_end": (0, 191, 255),    # Brighter Deep Sky Blue
+            "gradient_start": (10, 40, 100),    # Brighter Deep Ocean Blue
+            "gradient_end": (30, 120, 200),     # Brighter Cyan
             "text_primary": (255, 255, 255),
             "text_secondary": (210, 230, 255)
         }
