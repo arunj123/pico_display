@@ -19,10 +19,12 @@ class DeviceManager:
         if self.sock: return True
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.settimeout(10.0)
+            # A shorter timeout for the initial connection is fine
+            self.sock.settimeout(5.0) 
             print(f"Connecting to {config.PICO_IP}:{config.PICO_PORT}...")
             self.sock.connect((config.PICO_IP, config.PICO_PORT))
-            self.sock.settimeout(None) # Disable timeout for normal operations
+            # Set a default timeout for all subsequent socket operations (like waiting for ACK)
+            self.sock.settimeout(15.0) 
             print("Connected.")
             return True
         except (ConnectionRefusedError, OSError, socket.timeout) as e:
@@ -70,18 +72,19 @@ class DeviceManager:
             end_index = (y + tile_height) * bytes_per_row
             tile_pixel_data = pixel_data_full[start_index:end_index]
             
-            padding = (4 - (len(tile_pixel_data) % 4)) % 4
-            padded_pixel_data = tile_pixel_data + (b'\x00' * padding)
-            crc = zlib.crc32(padded_pixel_data)
+            # CRC is calculated on the raw, unpadded pixel data.
+            crc = zlib.crc32(tile_pixel_data)
             
             tile_x_global, tile_y_global = offset_x, offset_y + y
-            
             print(f"  - Sending tile {tile_count+1}: Pos({tile_x_global},{tile_y_global}), Size({sub_width}x{tile_height}), CRC(0x{crc:08X})")
             
             tile_header = struct.pack(config.IMAGE_TILE_HEADER_FORMAT, tile_x_global, tile_y_global, sub_width, tile_height, crc)
-            payload = tile_header + padded_pixel_data
             
-            if not self._send_frame(config.FRAME_TYPE_IMAGE_TILE, payload):
+            # --- Send the header and the raw pixel data directly. No more padding. ---
+            payload = tile_header + tile_pixel_data
+            
+            if not self._send_frame_and_wait_for_ack(config.FRAME_TYPE_IMAGE_TILE, payload):
+                print("  - FAILED to get ACK. Aborting transfer.")
                 return False, previous_image
             
             tile_img = ui_generator.reconstruct_image_from_rgb565(tile_pixel_data, sub_width, tile_height)
@@ -91,6 +94,43 @@ class DeviceManager:
             tile_count += 1
             
         return True, reconstructed_image
+
+    def _send_frame_and_wait_for_ack(self, frame_type, payload):
+        """Sends a frame and then blocks until an ACK is received."""
+        try:
+            # Send the data frame
+            frame = pack_frame(frame_type, payload)
+            self.sock.sendall(frame)
+            # Wait for the ACK frame
+            response = self.sock.recv(config.FRAME_HEADER_SIZE)
+            if len(response) < config.FRAME_HEADER_SIZE:
+                print("  - Error: Incomplete ACK response from device.")
+                return False
+            
+            magic, rcv_type, _ = struct.unpack(config.FRAME_HEADER_FORMAT, response)
+            
+            if magic != config.FRAME_MAGIC:
+                print("  - Error: Bad magic byte in ACK response.")
+                return False
+            
+            if rcv_type == config.FRAME_TYPE_TILE_ACK:
+                # print("  - ACK OK.") # Optional: for debugging
+                return True
+            elif rcv_type == config.FRAME_TYPE_TILE_NACK:
+                print("  - Error: Received NACK from device (checksum mismatch).")
+                return False
+            else:
+                print(f"  - Error: Received unexpected frame type {rcv_type} in response.")
+                return False
+
+        except socket.timeout:
+            print("  - Error: Timed out waiting for ACK from device.")
+            self.close()
+            return False
+        except OSError as e:
+            print(f"Socket error during send/receive: {e}")
+            self.close()
+            return False
 
     def _send_frame(self, frame_type, payload):
         try:

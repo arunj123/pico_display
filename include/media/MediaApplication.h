@@ -12,29 +12,29 @@
 #include "FrameProtocol.h"
 #include "config.h" 
 #include "pico/sync.h"
+#include <cassert>
 #include <array>
-
-class MediaApplication; // Forward declaration
-
 
 class MediaApplication {
 public:
     MediaApplication();
-    void run();
-
-    // --- Public handler for the protocol dispatcher ---
-    void on_image_tile_received(const Protocol::ImageTileHeader& header, const uint8_t* pixel_data, size_t pixel_len);
+    void setup();
+    // This is the correct signature for the callback
+    void on_image_tile_received(const Protocol::FrameHeader& frame_header, const uint8_t* payload);
+    void on_valid_tile_received(const Protocol::FrameHeader& frame_header, const uint8_t* payload);
 
 private:
+    void handle_encoder();
+    void poll_handler();
+    static void poll_handler_forwarder(btstack_timer_source_t* ts);
+
     MediaControllerDevice m_media_controller;
     RotaryEncoder m_encoder;
     St7789Display m_display;
-    
-    // Instantiate the templated Drawing class with the buffer size from config.h
-    Drawing<MAX_DRAW_BUFFER_PIXELS> m_drawing;
-    
+    Drawing m_drawing;
     TcpServer m_tcp_server;
 
+    btstack_timer_source_t m_poll_timer;
     btstack_timer_source_t m_release_timer;
     btstack_timer_source_t m_battery_timer;
     
@@ -43,16 +43,11 @@ private:
     ButtonState m_button_state;
     uint64_t m_button_armed_time_us;
     
-    Drawing<MAX_DRAW_BUFFER_PIXELS>::DrawStatus m_last_draw_status;
-
-    // --- Flag for deferred NACK sending ---
-    bool m_nack_is_pending = false;
-
-    // The queue now only needs to hold ONE tile, as TCP flow control
-    // will prevent more from arriving until we are ready.
-    critical_section_t m_tile_buffer_crit_sec;
-    bool m_tile_is_pending = false;
-    Protocol::Frame m_pending_tile;
+    critical_section_t m_tile_queue_crit_sec;
+    static constexpr size_t TILE_QUEUE_SIZE = 4;
+    std::array<Protocol::Frame, TILE_QUEUE_SIZE> m_tile_queue;
+    volatile uint8_t m_queue_head = 0;
+    volatile uint8_t m_queue_tail = 0;
 
     static void release_handler_forwarder(btstack_timer_source_t* ts);
     static void battery_timer_handler_forwarder(btstack_timer_source_t* ts);

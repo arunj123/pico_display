@@ -57,8 +57,10 @@ def get_current_theme():
     if 5 <= hour < 12: # Morning
         return {
             "name": "Morning Sky",
-            "gradient_start": (70, 130, 180), # Light Steel Blue
-            "gradient_end": (135, 206, 235), # Sky Blue
+            #"gradient_start": (70, 130, 180), # Light Steel Blue
+            #"gradient_end": (135, 206, 235), # Sky Blue
+            "gradient_start": (0, 10, 60),      # Deep Ocean Blue
+            "gradient_end": (10, 80, 140),      # Bright Cyan
             "text_primary": (255, 255, 255),
             "text_secondary": (230, 230, 250)
         }

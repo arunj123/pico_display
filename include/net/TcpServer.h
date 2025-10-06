@@ -19,15 +19,16 @@ public:
     TcpServer(MediaApplication* app);
     bool init(uint16_t port);
     void setReceiveCallback(tcp_frame_dispatch_callback_t callback);
-
-    // This is called from the main loop to process queued network data
     void poll();
+    err_t send_frame(Protocol::FrameType type, const uint8_t* payload, uint16_t len);
 
 private:
+    // Static callbacks remain the same
     static err_t tcp_accept_callback(void *arg, struct tcp_pcb *newpcb, err_t err);
     static err_t tcp_recv_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err);
     static void tcp_err_callback(void *arg, err_t err);
 
+    // Member function implementations
     err_t _recv_callback(struct tcp_pcb *tpcb, struct pbuf *p, err_t err);
     void _close_client_connection();
     void _process_stream_buffer();
@@ -35,18 +36,16 @@ private:
     MediaApplication* m_app_context;
     struct tcp_pcb *m_server_pcb = nullptr;
     struct tcp_pcb *m_client_pcb = nullptr;
-    
     tcp_frame_dispatch_callback_t m_dispatch_callback = nullptr;
 
-    // A thread-safe queue for raw pbuf pointers from the ISR
-    critical_section_t m_pbuf_queue_crit_sec;
-    static constexpr size_t PBUF_QUEUE_SIZE = 16;
-    std::array<struct pbuf*, PBUF_QUEUE_SIZE> m_pbuf_queue;
-    uint8_t m_pbuf_queue_head = 0;
-    uint8_t m_pbuf_queue_tail = 0;
-    uint8_t m_pbuf_queue_count = 0;
-
-    // A circular buffer for accumulating stream data in the main thread
+    // Replace the pbuf queue with a simple circular byte buffer ---
+    critical_section_t m_rx_crit_sec;
+    static constexpr size_t CIRC_BUFFER_SIZE = 16 * 1024; // 16KB, should be plenty
+    std::array<uint8_t, CIRC_BUFFER_SIZE> m_circ_buffer;
+    volatile uint32_t m_circ_head = 0;
+    volatile uint32_t m_circ_tail = 0;
+    
+    // This stream buffer is now populated from the circular buffer, not pbufs
     static constexpr size_t RX_BUFFER_SIZE = Protocol::MAX_PAYLOAD_SIZE * 2;
     std::array<uint8_t, RX_BUFFER_SIZE> m_rx_buffer;
     size_t m_rx_head = 0;

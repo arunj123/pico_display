@@ -34,8 +34,8 @@ pico_sdk_init()
 set(COMMON_SOURCES
     src/hid/HidDevice.cpp
     src/bt/BtStackManager.cpp
-    src/pico/picow_bt_example_common.cpp
-    src/pico/picow_bt_example_background.cpp
+    # src/pico/picow_bt_example_common.cpp
+    # src/pico/picow_bt_example_background.cpp
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/battery_service_server.c
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/device_information_service_server.c
 )
@@ -79,6 +79,7 @@ add_executable(${MEDIA_TARGET_NAME}
     src/media/MediaApplication.cpp
     src/media/MediaControllerDevice.cpp
     src/pico/RotaryEncoder.cpp
+    src/display/Drawing.cpp
     src/display/Display.cpp
     src/net/TcpServer.cpp
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/hids_device.c
@@ -106,9 +107,6 @@ target_include_directories(${MEDIA_TARGET_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/include/ble
     ${CMAKE_CURRENT_LIST_DIR}/include/media
     ${CMAKE_CURRENT_LIST_DIR}/include/net
-    ${CMAKE_CURRENT_BINARY_DIR}/generated/media_app_gatt_header
-    ${PICO_SDK_PATH}/lib/lwip/src/include 
-    ${PICO_SDK_PATH}/src/rp2_common/pico_lwip/include
 )
 
 target_compile_definitions(${MEDIA_TARGET_NAME} PRIVATE 

@@ -3,14 +3,12 @@
 #ifndef _LWIPOPTS_H
 #define _LWIPOPTS_H
 
-// --- THE CORE FIX: Enable OS-awareness ---
+// --- Use the required NO_SYS=1 setting ---
 #define NO_SYS                      1
-#define LWIP_SOCKET                 0 // We use the raw TCP API, not the Berkeley sockets API
+#define LWIP_SOCKET                 0
 #define LWIP_NETCONN                0
 
 // --- Memory Options ---
-#define MEM_LIBC_MALLOC             0
-#define MEMP_MEM_MALLOC             0
 #define MEM_ALIGNMENT               4
 #define MEM_SIZE                    (10 * 1024)
 
@@ -24,7 +22,6 @@
 #define TCP_SND_QUEUELEN            ((4 * (TCP_SND_BUF) + (TCP_MSS - 1))/(TCP_MSS))
 #define TCP_TMR_INTERVAL            100 // Required for threadsafe background mode
 
-// --- THE FIX: Satisfy the sanity check ---
 // Ensure we have enough memory pool entries for the TCP send queue
 #define MEMP_NUM_TCP_SEG            TCP_SND_QUEUELEN
 

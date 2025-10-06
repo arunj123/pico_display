@@ -2,18 +2,12 @@
 
 #include "MediaApplication.h"
 #include "BtStackManager.h"
-#include "config.h"
+#include "font_freesans_16.h"
 #include "pico/time.h"
 #include "hardware/gpio.h"
-#include "font_freesans_16.h"
-#include "test_img.h"
-#include <cstdio>
 #include "pico/cyw43_arch.h"
 #include "lwip/ip4_addr.h"
-#include "pico/stdlib.h"
 #include <algorithm>
-
-// Pre-computed CRC32 lookup table. Standard IEEE 802.3 CRC32 Software Implementation ---
 
 // This pre-computed table is for the standard CRC-32 algorithm (as used in PNG, Ethernet)
 static const uint32_t crc32_table[256] = {
@@ -71,6 +65,7 @@ static const uint32_t crc32_table[256] = {
 	0x2d02ef8dL
 };
 
+// --- CRC32 Table ---
 uint32_t calculate_crc32(const uint8_t *data, size_t length) {
     uint32_t crc = 0xffffffff;
     for (size_t i = 0; i < length; i++) {
@@ -78,30 +73,8 @@ uint32_t calculate_crc32(const uint8_t *data, size_t length) {
     }
     return crc ^ 0xffffffff;
 }
-// --- End CRC32 ---
 
-MediaApplication* g_app_instance = nullptr;
-
-void on_frame_received_callback(MediaApplication* app, const uint8_t* data, size_t len) {
-    if (!app || len < sizeof(Protocol::FrameHeader)) return;
-    
-    Protocol::FrameHeader header;
-    memcpy(&header, data, sizeof(header));
-    const uint8_t* payload = data + sizeof(header);
-    
-    if (header.type == Protocol::FrameType::IMAGE_TILE) {
-        if (header.payload_length < sizeof(Protocol::ImageTileHeader)) return;
-        
-        Protocol::ImageTileHeader tile_header;
-        memcpy(&tile_header, payload, sizeof(tile_header));
-        
-        const uint8_t* pixel_data = payload + sizeof(tile_header);
-        size_t pixel_len = header.payload_length - sizeof(tile_header);
-        
-        app->on_image_tile_received(tile_header, pixel_data, pixel_len);
-    }
-}
-
+// --- Class Implementation ---
 MediaApplication::MediaApplication() : 
     m_encoder(ENCODER_PIN_A, ENCODER_PIN_B, ENCODER_PIN_KEY),
     m_display(pio1, DISPLAY_PIN_SDA, DISPLAY_PIN_SCL, DISPLAY_PIN_CS, DISPLAY_PIN_DC, DISPLAY_PIN_RESET, DisplayOrientation::LANDSCAPE),
@@ -109,57 +82,44 @@ MediaApplication::MediaApplication() :
     m_tcp_server(this),
     m_battery_level(100),
     m_button_state(ButtonState::IDLE),
-    m_button_armed_time_us(0),
-    m_last_draw_status(Drawing<MAX_DRAW_BUFFER_PIXELS>::DrawStatus::IDLE),
-    m_tile_is_pending(false)
+    m_button_armed_time_us(0)
 {
-    g_app_instance = this;
-
-    m_release_timer.context = this;
-    m_battery_timer.context = this;
-    
-    btstack_run_loop_set_timer_handler(&m_release_timer, &MediaApplication::release_handler_forwarder);
-    btstack_run_loop_set_timer_handler(&m_battery_timer, &MediaApplication::battery_timer_handler_forwarder);
-    
-    BtStackManager::getInstance().registerHandler(&m_media_controller);
-
-    critical_section_init(&m_tile_buffer_crit_sec);
-    m_tcp_server.setReceiveCallback(on_frame_received_callback);
+    critical_section_init(&m_tile_queue_crit_sec);
 }
 
-void MediaApplication::on_image_tile_received(const Protocol::ImageTileHeader& header, const uint8_t* pixel_data, size_t pixel_len) {
-    uint32_t calculated_crc = calculate_crc32(pixel_data, pixel_len);
-
-    if (calculated_crc == header.crc32) {
-        critical_section_enter_blocking(&m_tile_buffer_crit_sec);
-        if (m_tile_is_pending) {
-            printf("WARN: New tile received while previous was drawing. Dropping.\n");
-        } else {
-            m_pending_tile.header.type = Protocol::FrameType::IMAGE_TILE;
-            m_pending_tile.header.payload_length = sizeof(header) + pixel_len;
-            memcpy(m_pending_tile.payload.data(), &header, sizeof(header));
-            memcpy(m_pending_tile.payload.data() + sizeof(header), pixel_data, pixel_len);
-            m_tile_is_pending = true;
-            printf("DEBUG: CRC OK. Tile is pending.\n");
-        }
-        critical_section_exit(&m_tile_buffer_crit_sec);
-    } else {
-        printf("!!! CHECKSUM MISMATCH !!! Dropping tile.\n");
-    }
-}
-
-void MediaApplication::run() {
+// --- The run() function ---
+void MediaApplication::setup() {
+    // --- STAGE 1: HARDWARE INITIALIZATION ---
     printf("Initializing Rotary Encoder...\n");
     m_encoder.init();
-    sleep_ms(50);
-    m_encoder.read_and_clear_rotation();
 
     printf("Initializing Display...\n");
     m_display.init();
     m_display.fillScreen(0);
-    m_drawing.drawString(10, 10, "Connecting to Wi-Fi...", 0xFFFF, &font_freesans_16);
     
+    // --- STAGE 2: BTstack & APPLICATION SOFTWARE SETUP ---
+    printf("Initializing BTstack components...\n");
+    BtStackManager::getInstance().registerHandler(&m_media_controller);
+    m_media_controller.setup();
+
+    // Set up application-specific timers
+    m_release_timer.context = this;
+    btstack_run_loop_set_timer_handler(&m_release_timer, &MediaApplication::release_handler_forwarder);
+    
+    m_battery_timer.context = this;
+    btstack_run_loop_set_timer_handler(&m_battery_timer, &MediaApplication::battery_timer_handler_forwarder);
+    btstack_run_loop_set_timer(&m_battery_timer, 30000);
+    btstack_run_loop_add_timer(&m_battery_timer);
+
+    // Set up the main polling timer, which will be the application's heartbeat
+    m_poll_timer.context = this;
+    btstack_run_loop_set_timer_handler(&m_poll_timer, &MediaApplication::poll_handler_forwarder);
+    btstack_run_loop_set_timer(&m_poll_timer, 10); // Start the first poll in 10ms
+    btstack_run_loop_add_timer(&m_poll_timer);
+
+    // --- STAGE 3: WI-FI CONNECTION (Blocking call, safe to do here) ---
     cyw43_arch_enable_sta_mode();
+    m_drawing.drawString(10, 10, "Connecting to Wi-Fi...", 0xFFFF, &font_freesans_16);
     printf("Connecting to Wi-Fi network: %s\n", WIFI_SSID);
 
     if (cyw43_arch_wifi_connect_timeout_ms(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_AES_PSK, 30000)) {
@@ -173,99 +133,136 @@ void MediaApplication::run() {
         m_drawing.fillRect(0, 10, 320, 20, 0);
         m_drawing.drawString(10, 10, "Waiting for host...", 0x07E0, &font_freesans_16);
     }
+}
+
+void MediaApplication::on_valid_tile_received(const Protocol::FrameHeader& frame_header, const uint8_t* payload) {
+    // This is called from the ISR. It must be fast. It just queues the data.
+    critical_section_enter_blocking(&m_tile_queue_crit_sec);
+    uint8_t next_head = (m_queue_head + 1) % TILE_QUEUE_SIZE;
+    if (next_head == m_queue_tail) {
+        printf("WARN: Tile queue is full. Dropping tile.\n");
+    } else {
+        Protocol::Frame& tile_slot = m_tile_queue[m_queue_head];
+        tile_slot.header = frame_header;
+        memcpy(tile_slot.payload.data(), payload, frame_header.payload_length);
+        m_queue_head = next_head;
+    }
+    critical_section_exit(&m_tile_queue_crit_sec);
+}
+
+// --- poll_handler (The Consumer) ---
+void MediaApplication::poll_handler() {
+    cyw43_arch_poll();
+    m_tcp_server.poll();
+    handle_encoder();
+
+    auto current_draw_status = m_drawing.processDrawing();
+    if (current_draw_status == Drawing::DrawStatus::IDLE) {
+        bool has_new_tile = false;
+        Protocol::Frame tile_to_draw;
+        
+        critical_section_enter_blocking(&m_tile_queue_crit_sec);
+        if (m_queue_head != m_queue_tail) {
+            has_new_tile = true;
+            tile_to_draw = m_tile_queue[m_queue_tail];
+            m_queue_tail = (m_queue_tail + 1) % TILE_QUEUE_SIZE;
+        }
+        critical_section_exit(&m_tile_queue_crit_sec);
+
+        if (has_new_tile) {
+            // We have successfully dequeued the tile and are about to process it.
+            // Now is the correct time to tell the host it can send the next one.
+            m_tcp_server.send_frame(Protocol::FrameType::TILE_ACK, nullptr, 0);
+
+            const uint8_t* payload = tile_to_draw.payload.data();
+            Protocol::ImageTileHeader tile_header;
+            memcpy(&tile_header, payload, sizeof(Protocol::ImageTileHeader));
+            const uint16_t* pixel_data = reinterpret_cast<const uint16_t*>(payload + sizeof(Protocol::ImageTileHeader));
+            m_drawing.drawImageAsync(tile_header.x, tile_header.y, tile_header.width, tile_header.height, pixel_data);
+        }
+    }
+    btstack_run_loop_set_timer(&m_poll_timer, 10);
+    btstack_run_loop_add_timer(&m_poll_timer);
+}
+
+// --- on_image_tile_received (The Producer) ---
+void MediaApplication::on_image_tile_received(const Protocol::FrameHeader& frame_header, const uint8_t* payload) {
+    critical_section_enter_blocking(&m_tile_queue_crit_sec);
     
-    printf("Initializing BTstack...\n");
-    m_media_controller.setup();
-    m_media_controller.powerOn();
+    uint8_t next_head = (m_queue_head + 1) % TILE_QUEUE_SIZE;
+    if (next_head == m_queue_tail) {
+        printf("WARN: Tile queue is full. Dropping tile.\n");
+    } else {
+        Protocol::Frame& tile_slot = m_tile_queue[m_queue_head];
+        tile_slot.header = frame_header;
+        memcpy(tile_slot.payload.data(), payload, frame_header.payload_length);
+        m_queue_head = next_head;
+    }
     
-    btstack_run_loop_set_timer(&m_battery_timer, 30000);
-    btstack_run_loop_add_timer(&m_battery_timer);
+    critical_section_exit(&m_tile_queue_crit_sec);
+}
 
-    while (true) {
-        cyw43_arch_wait_for_work_until(make_timeout_time_ms(10));
 
-        m_tcp_server.poll();
-
-        // 1. Handle Encoder (always runs, non-blocking)
-        if (m_media_controller.isConnected()) {
-            int8_t rotation_delta = m_encoder.read_and_clear_rotation();
-            
-            // --- DEBUG: Add this line ---
-            if (rotation_delta != 0) {
-                printf("Polling found rotation_delta: %d\n", rotation_delta);
-            }
-
+void MediaApplication::handle_encoder() {
+    if (m_media_controller.isConnected()) {
+        int8_t rotation_delta = m_encoder.read_and_clear_rotation();
+        
+        // --- Correctly re-schedule the timer ---
+        if (rotation_delta != 0) {
             if (rotation_delta > 0) {
                 m_media_controller.increaseVolume();
-                btstack_run_loop_set_timer(&m_release_timer, RELEASE_DELAY_MS);
-                btstack_run_loop_add_timer(&m_release_timer);
-            } else if (rotation_delta < 0) {
+            } else { // rotation_delta < 0
                 m_media_controller.decreaseVolume();
-                btstack_run_loop_set_timer(&m_release_timer, RELEASE_DELAY_MS);
-                btstack_run_loop_add_timer(&m_release_timer);
             }
 
-            uint64_t now_us = time_us_64();
-            bool is_key_down = (gpio_get(ENCODER_PIN_KEY) == 0);
-
-            switch (m_button_state) {
-                case ButtonState::IDLE:
-                    if (is_key_down) {
-                        m_button_armed_time_us = now_us;
-                        m_button_state = ButtonState::ARMED;
-                    }
-                    break;
-                case ButtonState::ARMED:
-                    if (!is_key_down) {
-                        m_button_state = ButtonState::IDLE;
-                    } else if ((now_us - m_button_armed_time_us) > (DEBOUNCE_DELAY_MS_KEY * 1000)) {
-                        m_media_controller.mute();
-                        btstack_run_loop_set_timer(&m_release_timer, RELEASE_DELAY_MS);
-                        btstack_run_loop_add_timer(&m_release_timer);
-                        m_button_state = ButtonState::PRESSED;
-                    }
-                    break;
-                case ButtonState::PRESSED:
-                    if (!is_key_down) {
-                        m_button_state = ButtonState::IDLE;
-                    }
-                    break;
-            }
+            // This is the robust way to handle a re-triggerable event:
+            // 1. Always remove the timer from the run loop. It's safe to call even if it's not scheduled.
+            btstack_run_loop_remove_timer(&m_release_timer);
+            // 2. Set its new timeout.
+            btstack_run_loop_set_timer(&m_release_timer, RELEASE_DELAY_MS);
+            // 3. Add it back to the run loop.
+            btstack_run_loop_add_timer(&m_release_timer);
         }
-        auto current_draw_status = m_drawing.processDrawing();
 
-        if (current_draw_status == Drawing<MAX_DRAW_BUFFER_PIXELS>::DrawStatus::IDLE) {
-            bool has_new_tile = false;
-            Protocol::Frame tile_to_draw;
+        uint64_t now_us = time_us_64();
+        bool is_key_down = (gpio_get(ENCODER_PIN_KEY) == 0);
 
-            critical_section_enter_blocking(&m_tile_buffer_crit_sec);
-            if (m_tile_is_pending) {
-                has_new_tile = true;
-                tile_to_draw = m_pending_tile;
-                m_tile_is_pending = false;
-            }
-            critical_section_exit(&m_tile_buffer_crit_sec);
+        switch (m_button_state) {
+            case ButtonState::IDLE:
+                if (is_key_down) {
+                    m_button_armed_time_us = now_us;
+                    m_button_state = ButtonState::ARMED;
+                }
+                break;
+            case ButtonState::ARMED:
+                if (!is_key_down) {
+                    m_button_state = ButtonState::IDLE;
+                } else if ((now_us - m_button_armed_time_us) > (DEBOUNCE_DELAY_MS_KEY * 1000)) {
+                    m_media_controller.mute();
+                    
+                    // --- Also apply the fix to the mute button's release timer ---
+                    btstack_run_loop_remove_timer(&m_release_timer);
+                    btstack_run_loop_set_timer(&m_release_timer, RELEASE_DELAY_MS);
+                    btstack_run_loop_add_timer(&m_release_timer);
 
-            if (has_new_tile) {
-                printf("DEBUG: Tile consumed. Starting async draw.\n");
-                Protocol::ImageTileHeader tile_header;
-                memcpy(&tile_header, tile_to_draw.payload.data(), sizeof(tile_header));
-                
-                const uint16_t* pixel_data = reinterpret_cast<const uint16_t*>(
-                    tile_to_draw.payload.data() + sizeof(tile_header)
-                );
-                
-                m_drawing.drawImageAsync(tile_header.x, tile_header.y, tile_header.width, tile_header.height, pixel_data);
-            }
+                    m_button_state = ButtonState::PRESSED;
+                }
+                break;
+            case ButtonState::PRESSED:
+                if (!is_key_down) {
+                    m_button_state = ButtonState::IDLE;
+                }
+                break;
         }
-        m_last_draw_status = current_draw_status;
     }
 }
 
-// --- Static Forwarders and Member Handlers ---
+// --- Timer Forwarders ---
+void MediaApplication::poll_handler_forwarder(btstack_timer_source_t* ts) { static_cast<MediaApplication*>(ts->context)->poll_handler(); }
 void MediaApplication::release_handler_forwarder(btstack_timer_source_t* ts) { static_cast<MediaApplication*>(ts->context)->release_handler(); }
 void MediaApplication::battery_timer_handler_forwarder(btstack_timer_source_t* ts) { static_cast<MediaApplication*>(ts->context)->battery_timer_handler(); }
 
+// --- Timer Handlers ---
 void MediaApplication::release_handler() {
     if (m_media_controller.isConnected()) {
         m_media_controller.release();

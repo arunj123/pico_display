@@ -30,7 +30,6 @@ static void shared_gpio_irq_handler() {
     }
 }
 
-// --- THE FIX: Constructor is now minimal ---
 // It only sets up internal state and does NOT touch hardware.
 RotaryEncoder::RotaryEncoder(uint pin_A, uint pin_B, uint pin_Key) :
     m_pin_A(pin_A), m_pin_B(pin_B), m_pin_Key(pin_Key)
@@ -55,15 +54,18 @@ void RotaryEncoder::init()
     gpio_set_dir(m_pin_Key, GPIO_IN);
     gpio_pull_up(m_pin_Key);
 
-    // --- Register our raw handler and enable IRQs ---
+    // --- Register our raw handler with a higher priority ---
     uint32_t irq_mask = (1u << m_pin_A) | (1u << m_pin_Key);
 
-    // --- THE FIX: Add an explicit, higher priority for the handler ---
-    // This priority ensures it runs before many lower-priority SDK handlers.
+    // The CYW43 driver uses priority 0x40. By specifying a numerically
+    // lower value (e.g., 0x30), we are telling the SDK that our handler
+    // is higher priority and must be called, allowing it to coexist.
+    const uint8_t ENCODER_IRQ_PRIORITY = 0x30;
+
     gpio_add_raw_irq_handler_with_order_priority_masked(
         irq_mask, 
         &shared_gpio_irq_handler,
-        PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY // <-- Use a higher priority
+        ENCODER_IRQ_PRIORITY
     );
 
     irq_set_enabled(IO_IRQ_BANK0, true);
@@ -71,7 +73,6 @@ void RotaryEncoder::init()
     gpio_set_irq_enabled(m_pin_A, GPIO_IRQ_EDGE_FALL, true);
     gpio_set_irq_enabled(m_pin_Key, GPIO_IRQ_EDGE_FALL, true);
 }
-
 
 void RotaryEncoder::_key_isr() {
     m_key_event_occurred = true;
