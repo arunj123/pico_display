@@ -6,6 +6,7 @@
 #include "media_controller.h"
 #include "BleDescriptors.h"
 #include "ble/gatt-service/battery_service_server.h"
+#include "pico/stdlib.h" // For sleep_ms
 
 #include <string>
 #include <cstring>
@@ -94,17 +95,22 @@ void MediaControllerDevice::release() { uint8_t report[] = {0x00}; sendHidReport
 
 void MediaControllerDevice::enterSetupMode() {
     printf("Entering Setup Mode (HID Disabled)\n");
-    m_setup_mode = true;
     
-    // 1. Disconnect current user
+    // 1. Try to disconnect if we think we are connected
     disconnect();
     
-    // 2. Disable Advertising temporarily
+    // 2. Stop Advertising completely
     gap_advertisements_enable(0);
     
-    // 3. Set new Advertisement Data (Generic Device, NOT HID)
+    // 3. Small blocking delay to ensure the stack processes the disconnect/stop
+    // This is safe here because we are about to enter a configuration mode
+    sleep_ms(50);
+    
+    // 4. Update the data to "Pico Setup"
     gap_advertisements_set_data(sizeof(setup_adv_data), (uint8_t*)setup_adv_data);
     
-    // 4. Re-enable Advertising
+    // 5. Restart Advertising
     gap_advertisements_enable(1);
+    
+    printf("Now advertising as 'Pico Setup'. Please connect via Web Page.\n");
 }
