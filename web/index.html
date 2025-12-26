@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pico W Network Setup</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f9; display: flex; flex-direction: column; align-items: center; padding-top: 50px; }
+        .container { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 300px; text-align: center; }
+        h2 { margin-top: 0; color: #333; }
+        input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 10px; background-color: #007bff; color: white; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; margin-top: 10px; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        button#disconnect { background-color: #dc3545; display: none; }
+        .status { margin-top: 15px; font-size: 0.9em; color: #666; min-height: 20px; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>Wi-Fi Setup</h2>
+        <p>Connect to your Pico W Media Controller to update Wi-Fi settings.</p>
+
+        <div id="connection-ui">
+            <button id="connectBtn">Connect to Device</button>
+        </div>
+
+        <div id="form-ui" class="hidden">
+            <input type="text" id="ssid" placeholder="Wi-Fi Name (SSID)" required>
+            <input type="password" id="password" placeholder="Password">
+            <button id="sendBtn">Save to Device</button>
+            <button id="disconnect">Disconnect</button>
+        </div>
+
+        <div class="status" id="status">Ready to connect...</div>
+    </div>
+
+    <script>
+        // UUIDs must match the C++ .gatt file exactly
+        const SERVICE_UUID = "0000ff00-0000-1000-8000-00805f9b34fb";
+        const CHARACTERISTIC_UUID = "0000ff01-0000-1000-8000-00805f9b34fb";
+        
+        // Use the Device Name defined in BleDescriptors.h / advertising data
+        const DEVICE_NAME_PREFIX = "Pico Media"; 
+
+        let bluetoothDevice;
+        let wifiCharacteristic;
+
+        const connectBtn = document.getElementById('connectBtn');
+        const sendBtn = document.getElementById('sendBtn');
+        const disconnectBtn = document.getElementById('disconnect');
+        const statusDiv = document.getElementById('status');
+        const formUi = document.getElementById('form-ui');
+        const connectionUi = document.getElementById('connection-ui');
+
+        function updateStatus(msg, isError = false) {
+            statusDiv.textContent = msg;
+            statusDiv.style.color = isError ? 'red' : '#666';
+        }
+
+        connectBtn.addEventListener('click', async () => {
+            try {
+                updateStatus('Requesting Bluetooth Device...');
+                
+                // Request device with specific filter and required service
+                bluetoothDevice = await navigator.bluetooth.requestDevice({
+                    filters: [{ namePrefix: DEVICE_NAME_PREFIX }],
+                    optionalServices: [SERVICE_UUID] 
+                });
+
+                bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
+
+                updateStatus('Connecting to GATT Server...');
+                const server = await bluetoothDevice.gatt.connect();
+
+                updateStatus('Getting Service...');
+                const service = await server.getPrimaryService(SERVICE_UUID);
+
+                updateStatus('Getting Characteristic...');
+                wifiCharacteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+
+                // UI Transition
+                updateStatus('Connected!');
+                connectionUi.classList.add('hidden');
+                formUi.classList.remove('hidden');
+                disconnectBtn.style.display = 'block';
+
+            } catch (error) {
+                console.error(error);
+                updateStatus('Connection failed: ' + error.message, true);
+            }
+        });
+
+        sendBtn.addEventListener('click', async () => {
+            const ssid = document.getElementById('ssid').value;
+            const password = document.getElementById('password').value;
+
+            if (!ssid) {
+                updateStatus("SSID is required", true);
+                return;
+            }
+
+            // Format: "SSID:PASSWORD"
+            const payload = `${ssid}:${password}`;
+            const encoder = new TextEncoder();
+            const data = encoder.encode(payload);
+
+            try {
+                updateStatus('Sending credentials...');
+                await wifiCharacteristic.writeValue(data);
+                updateStatus('Sent! Device should reboot.', false);
+                
+                // Optional: Disconnect after a brief delay
+                setTimeout(() => {
+                   if (bluetoothDevice && bluetoothDevice.gatt.connected) {
+                       bluetoothDevice.gatt.disconnect();
+                   }
+                }, 2000);
+                
+            } catch (error) {
+                console.error(error);
+                updateStatus('Write failed: ' + error.message, true);
+            }
+        });
+
+        disconnectBtn.addEventListener('click', () => {
+            if (bluetoothDevice && bluetoothDevice.gatt.connected) {
+                bluetoothDevice.gatt.disconnect();
+            }
+        });
+
+        function onDisconnected() {
+            updateStatus('Device disconnected.');
+            formUi.classList.add('hidden');
+            connectionUi.classList.remove('hidden');
+            disconnectBtn.style.display = 'none';
+        }
+    </script>
+</body>
+</html>
