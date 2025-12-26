@@ -182,16 +182,16 @@ The included `.vscode` configuration files (`settings.json`, `tasks.json`, `laun
     cd build
 
     # Configure the project
-    cmake ..
+    cmake -B build -G "Ninja"
     ```
 
 3.  **Compile a Specific Target:**
     ```bash
     # To build the Media Controller
-    cmake --build . --target media_app
+    cmake --build build --target media_app
 
     # To build the Keyboard
-    cmake --build . --target keyboard_app
+    ccmake --build build --target keyboard_app
     ```
     This will generate a `.uf2` file inside the `build` directory (e.g., `media_app.uf2`).
 
