@@ -31,18 +31,32 @@ void HidDevice::typingTimerHandler(btstack_timer_source_t* ts) { onTypingTimer_i
 
 void HidDevice::handlePacket(uint8_t packet_type, uint16_t, uint8_t* packet, uint16_t) {
     if (packet_type != HCI_EVENT_PACKET) return;
+    
     switch (hci_event_packet_get_type(packet)) {
+        
+        // --- ADD THIS CASE ---
+        case HCI_EVENT_CONNECTION_COMPLETE:
+            if (hci_event_connection_complete_get_status(packet) == 0) {
+                m_connection_handle = hci_event_connection_complete_get_connection_handle(packet);
+                printf("BT Connected (ACL), Handle: 0x%04X\n", m_connection_handle);
+            }
+            break;
+        // ---------------------
+
         case HCI_EVENT_DISCONNECTION_COMPLETE:
             m_connection_handle = HCI_CON_HANDLE_INVALID;
             printf("Disconnected\n");
             break;
+            
         case SM_EVENT_JUST_WORKS_REQUEST:
             printf("Just Works requested\n");
             sm_just_works_confirm(sm_event_just_works_request_get_handle(packet));
             break;
+            
         case HCI_EVENT_HIDS_META:
             switch (hci_event_hids_meta_get_subevent_code(packet)) {
                 case HIDS_SUBEVENT_INPUT_REPORT_ENABLE:
+                    // It's safe to overwrite this, it will be the same handle
                     m_connection_handle = hids_subevent_input_report_enable_get_con_handle(packet);
                     printf("Report Characteristic Subscribed %u\n", hids_subevent_input_report_enable_get_enable(packet));
                     if (isConnected()) onHidSubscribed();

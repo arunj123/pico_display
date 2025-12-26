@@ -9,6 +9,7 @@
 class MediaControllerDevice : public HidDevice {
 public:
     void setup() override;
+    void enterSetupMode();
     void setBatteryLevel(uint8_t level);
 
     // Media Control Methods
@@ -19,7 +20,6 @@ public:
     void nextTrack();
     void previousTrack();
     void release();
-    void enterSetupMode();
 
 protected:
     // Implementations for the pure virtual functions from HidDevice

@@ -108,7 +108,7 @@
 
             try {
                 updateStatus('Sending credentials...');
-                await wifiCharacteristic.writeValueWithoutResponse(data);
+                await wifiCharacteristic.writeValue(data);
                 updateStatus('Sent! Device should reboot.', false);
                 
                 // Optional: Disconnect after a brief delay

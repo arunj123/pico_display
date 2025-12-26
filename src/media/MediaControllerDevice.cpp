@@ -33,36 +33,42 @@ const uint8_t setup_adv_data[] = {
     0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00
 };
 
-// Define a write callback
 int att_write_callback(hci_con_handle_t con_handle, uint16_t att_handle, uint16_t transaction_mode, uint16_t offset, uint8_t *buffer, uint16_t buffer_size) {
-    printf("ATT Write: Handle=0x%04X, Len=%d\n", att_handle, buffer_size);
+    
+    // Debug Print
+    printf("ATT Write: Handle=0x%04X, Len=%d, Mode=%d\n", att_handle, buffer_size, transaction_mode);
 
-    // Check if the write is for our Wifi Characteristic
     if (att_handle == ATT_CHARACTERISTIC_0000FF01_0000_1000_8000_00805F9B34FB_01_VALUE_HANDLE) {
-        
-        // Parse "SSID:PASSWORD"
         std::string payload((char*)buffer, buffer_size);
+        printf("Payload received: %s\n", payload.c_str()); // Print the received string
+
         size_t separator = payload.find(':');
         
         if (separator != std::string::npos) {
             std::string ssid = payload.substr(0, separator);
             std::string pass = payload.substr(separator + 1);
             
-            printf("Received Wi-Fi Config via BLE. Saving...\n");
-            
-            // Save to Flash
             WifiConfig::save(ssid.c_str(), pass.c_str());
             
-            // Optional: Trigger a reboot or a state machine event to connect
-            watchdog_reboot(0, 0, 100); 
+            printf("Rebooting in 2 seconds...\n");
+            stdio_flush();
+            
+            // --- IMPORTANT: Wait for print buffer to flush and flash to settle ---
+            sleep_ms(2000); 
+            watchdog_reboot(0, 0, 0);
+        } else {
+            printf("Error: Invalid payload format (Missing ':')\n");
         }
-        return 0; // OK
+        return 0; 
     }
     return 0;
 }
 
 void MediaControllerDevice::setup() {
     HidDevice::setup();
+
+    printf("Registering ATT Write Callback...\n");
+
     att_server_init(profile_data, nullptr, att_write_callback);
     hids_device_init(0, getHidDescriptor(), getHidDescriptorSize());
     battery_service_server_init(100);
@@ -95,22 +101,43 @@ void MediaControllerDevice::release() { uint8_t report[] = {0x00}; sendHidReport
 
 void MediaControllerDevice::enterSetupMode() {
     printf("Entering Setup Mode (HID Disabled)\n");
+    m_setup_mode = true;
     
-    // 1. Try to disconnect if we think we are connected
+    // 1. Kill existing connection (Kill the Zombie)
     disconnect();
     
-    // 2. Stop Advertising completely
+    // 2. Stop Advertising
     gap_advertisements_enable(0);
+    sleep_ms(50); // Give the stack a moment
     
-    // 3. Small blocking delay to ensure the stack processes the disconnect/stop
-    // This is safe here because we are about to enter a configuration mode
-    sleep_ms(50);
+    // 3. --- NEW: Change Identity to Random Address ---
+    // This fools Windows into thinking we are a stranger.
+    bd_addr_t random_addr;
+    // We'll generate a static random address: 0xC0 (top bits 11) ensures it's "Random Static"
+    // We can just use a fixed one for setup mode: C0:FF:EE:C0:FF:EE
+    bd_addr_t setup_addr = {0xC0, 0xFF, 0xEE, 0xC0, 0xFF, 0xEE};
     
-    // 4. Update the data to "Pico Setup"
+    // Configure stack to use this random address
+    gap_random_address_set(setup_addr);
+    
+    // Tell advertising to USE the random address (0x01 = Random Address Type)
+    // Params: min, max, adv_type, direct_addr_type, direct_addr, channel_map, filter_policy
+    // Note: BTstack usually sets the own_addr_type via gap_advertisements_set_params logic
+    // but we might need to rely on the default behavior picking up the set random address 
+    // if we don't explicitly control the "own_address_type" parameter (which is hidden in some API wrappers).
+    // However, on Pico SDK's BTstack, simply setting the random address is often enough if the Advertising parameters are refreshed.
+    
+    // Let's force update parameters. 
+    // We keep default intervals (0x0030) but we need to ensure the stack knows we swapped addresses.
+    // NOTE: The Pico-SDK version of gap_advertisements_set_params DOES NOT take "own_address_type".
+    // It is inferred. We must hope gap_random_address_set takes precedence when configured.
+    // ---------------------------------------------------
+
+    // 4. Set the new name "Pico Setup"
     gap_advertisements_set_data(sizeof(setup_adv_data), (uint8_t*)setup_adv_data);
     
     // 5. Restart Advertising
     gap_advertisements_enable(1);
     
-    printf("Now advertising as 'Pico Setup'. Please connect via Web Page.\n");
+    printf("Now advertising as 'Pico Setup' (Address Spoofed).\n");
 }

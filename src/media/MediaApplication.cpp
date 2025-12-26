@@ -106,6 +106,8 @@ void MediaApplication::setup() {
 
     const char* target_ssid = has_creds ? creds.ssid : WIFI_SSID; // Fallback to config.h if flash empty
     const char* target_pass = has_creds ? creds.password : WIFI_PASSWORD;
+
+    printf("Target Wi-Fi SSID: %s\n", target_ssid);
     
     // --- STAGE 2: BTstack & APPLICATION SOFTWARE SETUP ---
     printf("Initializing BTstack components...\n");
