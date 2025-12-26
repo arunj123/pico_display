@@ -108,15 +108,17 @@
 
             try {
                 updateStatus('Sending credentials...');
-                await wifiCharacteristic.writeValue(data);
+                // This is "Fire and Forget". It doesn't wait for a handshake, 
+                // avoiding the "Not Permitted" error in most cases.
+                await wifiCharacteristic.writeValueWithoutResponse(data); 
                 updateStatus('Sent! Device should reboot.', false);
                 
-                // Optional: Disconnect after a brief delay
+                // Auto-disconnect after sending to be clean
                 setTimeout(() => {
-                   if (bluetoothDevice && bluetoothDevice.gatt.connected) {
-                       bluetoothDevice.gatt.disconnect();
-                   }
-                }, 2000);
+                    if (bluetoothDevice && bluetoothDevice.gatt.connected) {
+                        bluetoothDevice.gatt.disconnect();
+                    }
+                }, 1000);
                 
             } catch (error) {
                 console.error(error);
@@ -127,6 +129,12 @@
         disconnectBtn.addEventListener('click', () => {
             if (bluetoothDevice && bluetoothDevice.gatt.connected) {
                 bluetoothDevice.gatt.disconnect();
+
+                updateStatus('Disconnected by user.');
+                // Reset UI
+                formUi.classList.add('hidden');
+                connectionUi.classList.remove('hidden');
+                disconnectBtn.style.display = 'none';
             }
         });
 
