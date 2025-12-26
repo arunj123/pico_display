@@ -35,7 +35,7 @@ private:
     btstack_timer_source_t m_battery_timer;
     
     uint8_t m_battery_level;
-    enum class ButtonState { IDLE, ARMED, PRESSED };
+    enum class ButtonState { IDLE, ARMED, PRESSED, WAIT_FOR_RELEASE };
     ButtonState m_button_state;
     uint64_t m_button_armed_time_us;
     

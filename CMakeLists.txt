@@ -107,6 +107,7 @@ target_include_directories(${MEDIA_TARGET_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/include/ble
     ${CMAKE_CURRENT_LIST_DIR}/include/media
     ${CMAKE_CURRENT_LIST_DIR}/include/net
+    ${CMAKE_CURRENT_LIST_DIR}/src/pico
 )
 
 target_compile_definitions(${MEDIA_TARGET_NAME} PRIVATE 

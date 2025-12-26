@@ -4,6 +4,7 @@
 #include "BtStackManager.h"
 #include "font_freesans_16.h"
 #include "pico/time.h"
+#include "WifiConfig.h" 
 #include "hardware/gpio.h"
 #include "pico/cyw43_arch.h"
 #include "lwip/ip4_addr.h"
@@ -97,6 +98,14 @@ void MediaApplication::setup() {
     printf("Initializing Display...\n");
     m_display.init();
     m_display.fillScreen(0);
+
+
+    // Check Flash for Credentials
+    WifiCredentials creds;
+    bool has_creds = WifiConfig::load(creds);
+
+    const char* target_ssid = has_creds ? creds.ssid : WIFI_SSID; // Fallback to config.h if flash empty
+    const char* target_pass = has_creds ? creds.password : WIFI_PASSWORD;
     
     // --- STAGE 2: BTstack & APPLICATION SOFTWARE SETUP ---
     printf("Initializing BTstack components...\n");
@@ -121,12 +130,12 @@ void MediaApplication::setup() {
     // --- STAGE 3: WI-FI CONNECTION (Blocking call, safe to do here) ---
     cyw43_arch_enable_sta_mode();
     m_drawing.drawString(10, 10, "Connecting to Wi-Fi...", 0xFFFF, &font_freesans_16);
-    printf("Connecting to Wi-Fi network: %s\n", WIFI_SSID);
+    printf("Connecting to Wi-Fi network: %s\n", target_ssid);
 
-    if (cyw43_arch_wifi_connect_timeout_ms(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_AES_PSK, 30000)) {
+    if (cyw43_arch_wifi_connect_timeout_ms(target_ssid, target_pass, CYW43_AUTH_WPA2_AES_PSK, 30000)) {
         printf("Failed to connect to Wi-Fi.\n");
         m_drawing.fillRect(0, 10, 320, 20, 0);
-        m_drawing.drawString(10, 10, "Wi-Fi connection failed.", 0xF800, &font_freesans_16);
+        m_drawing.drawString(10, 10, "Wi-Fi connection failed. Use BLE to configure.", 0xF800, &font_freesans_16);
     } else {
         printf("Connected to Wi-Fi. IP: %s\n", ip4addr_ntoa(netif_ip4_addr(&cyw43_state.netif[0])));
         cyw43_wifi_pm(&cyw43_state, CYW43_PERFORMANCE_PM);
@@ -240,31 +249,21 @@ void MediaApplication::on_image_tile_received(const Protocol::FrameHeader& frame
 
 
 void MediaApplication::handle_encoder() {
-    // 1. Define the 'connected' variable at the very top so it is visible everywhere
     bool connected = m_media_controller.isConnected();
 
+    // --- 1. Handle Rotation (Volume) ---
     int8_t rotation_delta = m_encoder.read_and_clear_rotation();
-    
-    // 2. Handle Rotation
-    if (rotation_delta != 0) {
-        // Debug print to confirm hardware is working
-        printf("Encoder Rotate: %d (BT Connected: %s)\n", rotation_delta, connected ? "Yes" : "No");
+    if (rotation_delta != 0 && connected) {
+        if (rotation_delta > 0) m_media_controller.increaseVolume();
+        else m_media_controller.decreaseVolume();
         
-        if (connected) {
-            if (rotation_delta > 0) {
-                m_media_controller.increaseVolume();
-            } else {
-                m_media_controller.decreaseVolume();
-            }
-            
-            // Reset release timer
-            btstack_run_loop_remove_timer(&m_release_timer);
-            btstack_run_loop_set_timer(&m_release_timer, RELEASE_DELAY_MS);
-            btstack_run_loop_add_timer(&m_release_timer);
-        }
+        // Reset release timer for iOS keyboard handling
+        btstack_run_loop_remove_timer(&m_release_timer);
+        btstack_run_loop_set_timer(&m_release_timer, RELEASE_DELAY_MS);
+        btstack_run_loop_add_timer(&m_release_timer);
     }
 
-    // 3. Handle Button Press
+    // --- 2. Handle Button Press (State Machine) ---
     uint64_t now_us = time_us_64();
     bool is_key_down = (gpio_get(ENCODER_PIN_KEY) == 0);
 
@@ -275,24 +274,45 @@ void MediaApplication::handle_encoder() {
                 m_button_state = ButtonState::ARMED;
             }
             break;
+
         case ButtonState::ARMED:
+            // This state acts as the Debounce
             if (!is_key_down) {
+                // Button released too fast (bounce) -> Ignore
                 m_button_state = ButtonState::IDLE;
             } else if ((now_us - m_button_armed_time_us) > (DEBOUNCE_DELAY_MS_KEY * 1000)) {
-                // Debug print for click
-                printf("Encoder Click! (BT Connected: %s)\n", connected ? "Yes" : "No");
+                // Debounce passed (50ms). It's a valid press.
+                // Move to PRESSED, but DO NOT MUTE YET.
+                m_button_state = ButtonState::PRESSED;
+            }
+            break;
 
+        case ButtonState::PRESSED:
+            if (!is_key_down) {
+                // User released the button quickly (< 3 seconds)
+                // This is a CLICK -> Toggle Mute
+                printf("Encoder Click! (Mute)\n");
                 if (connected) {
                     m_media_controller.mute();
-                    
+                    // Reset release timer for proper HID behavior
                     btstack_run_loop_remove_timer(&m_release_timer);
                     btstack_run_loop_set_timer(&m_release_timer, RELEASE_DELAY_MS);
                     btstack_run_loop_add_timer(&m_release_timer);
                 }
-                m_button_state = ButtonState::PRESSED;
+                m_button_state = ButtonState::IDLE;
+            } 
+            else {
+                // Button is still held down. Check for Long Press (3s).
+                if ((now_us - m_button_armed_time_us) > (3000 * 1000)) {
+                    printf("Long Press: Entering Setup Mode...\n");
+                    m_media_controller.enterSetupMode();
+                    m_button_state = ButtonState::WAIT_FOR_RELEASE;
+                }
             }
             break;
-        case ButtonState::PRESSED:
+
+        case ButtonState::WAIT_FOR_RELEASE:
+            // Do nothing until the user lets go of the button
             if (!is_key_down) {
                 m_button_state = ButtonState::IDLE;
             }

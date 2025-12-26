@@ -19,6 +19,7 @@ public:
     void nextTrack();
     void previousTrack();
     void release();
+    void enterSetupMode();
 
 protected:
     // Implementations for the pure virtual functions from HidDevice
@@ -26,6 +27,8 @@ protected:
     uint16_t getHidDescriptorSize() const override;
     const uint8_t* getAdvertisingData() const override;
     uint16_t getAdvertisingDataSize() const override;
+
+    bool m_setup_mode = false;
 };
 
 #endif // MEDIA_CONTROLLER_DEVICE_H

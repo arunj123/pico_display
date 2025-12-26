@@ -12,6 +12,8 @@ public:
     bool isConnected() const;
     void requestToSend();
 
+    void disconnect();
+
     // I_BtStackHandler implementation
     void handlePacket(uint8_t packet_type, uint16_t channel, uint8_t* packet, uint16_t size) override;
     void onReadyToSend() override;

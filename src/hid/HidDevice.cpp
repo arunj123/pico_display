@@ -7,6 +7,11 @@ HidDevice::HidDevice() : m_connection_handle(HCI_CON_HANDLE_INVALID) {}
 
 bool HidDevice::isConnected() const { return m_connection_handle != HCI_CON_HANDLE_INVALID; }
 void HidDevice::requestToSend() { if (isConnected()) hids_device_request_can_send_now_event(m_connection_handle); }
+void HidDevice::disconnect() {
+    if (isConnected()) {
+        gap_disconnect(m_connection_handle);
+    }
+}
 void HidDevice::setup() {
     l2cap_init();
     sm_init();

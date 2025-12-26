@@ -11,7 +11,7 @@ constexpr uint ENCODER_PIN_B = 11;
 constexpr uint ENCODER_PIN_KEY = 12;
 
 // --- Application Behavior ---
-constexpr int RELEASE_DELAY_MS = 50;
+constexpr int RELEASE_DELAY_MS = 100;
 constexpr int DEBOUNCE_DELAY_MS_KEY = 50; // A standard, robust debounce time
 constexpr int DEBOUNCE_DELAY_MS_ROTATION = 2; // Short debounce for rotation
 
