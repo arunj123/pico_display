@@ -7,6 +7,7 @@
 #include "hardware/gpio.h"
 #include "pico/cyw43_arch.h"
 #include "lwip/ip4_addr.h"
+#include "hardware/watchdog.h"
 #include <algorithm>
 
 // This pre-computed table is for the standard CRC-32 algorithm (as used in PNG, Ethernet)
@@ -152,9 +153,44 @@ void MediaApplication::on_valid_tile_received(const Protocol::FrameHeader& frame
 
 // --- poll_handler (The Consumer) ---
 void MediaApplication::poll_handler() {
+    watchdog_update();
     cyw43_arch_poll();
-    m_tcp_server.poll();
+    
+    // Only poll server if active to check for timeouts
+    if (m_tcp_server_active) {
+        m_tcp_server.poll();
+    }
     handle_encoder();
+
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+    if (now - m_last_wifi_check > 1000) { 
+        m_last_wifi_check = now;
+        int link_status = cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA);
+
+        if (link_status == CYW43_LINK_UP) {
+            if (!m_tcp_server_active) {
+                printf("Wi-Fi UP. Starting TCP Server...\n");
+                if (m_tcp_server.init(4242)) {
+                    m_tcp_server_active = true;
+                    // ... drawing commands ...
+                    printf("TCP Server Listening\n");
+                }
+            }
+        } else {
+            // Wi-Fi Lost
+            if (m_tcp_server_active) {
+                printf("Wi-Fi Lost. Stopping TCP Server.\n");
+                m_tcp_server.close(); // <--- CLEANUP
+                m_tcp_server_active = false;
+            }
+            
+            // Reconnect logic...
+            if (link_status != CYW43_LINK_JOIN && link_status != CYW43_LINK_NOIP) {
+                 printf("Wi-Fi Connecting...\n");
+                 cyw43_arch_wifi_connect_async(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_AES_PSK);
+            }
+        }
+    }
 
     auto current_draw_status = m_drawing.processDrawing();
     if (current_draw_status == Drawing::DrawStatus::IDLE) {
@@ -204,56 +240,63 @@ void MediaApplication::on_image_tile_received(const Protocol::FrameHeader& frame
 
 
 void MediaApplication::handle_encoder() {
-    if (m_media_controller.isConnected()) {
-        int8_t rotation_delta = m_encoder.read_and_clear_rotation();
+    // 1. Define the 'connected' variable at the very top so it is visible everywhere
+    bool connected = m_media_controller.isConnected();
+
+    int8_t rotation_delta = m_encoder.read_and_clear_rotation();
+    
+    // 2. Handle Rotation
+    if (rotation_delta != 0) {
+        // Debug print to confirm hardware is working
+        printf("Encoder Rotate: %d (BT Connected: %s)\n", rotation_delta, connected ? "Yes" : "No");
         
-        // --- Correctly re-schedule the timer ---
-        if (rotation_delta != 0) {
+        if (connected) {
             if (rotation_delta > 0) {
                 m_media_controller.increaseVolume();
-            } else { // rotation_delta < 0
+            } else {
                 m_media_controller.decreaseVolume();
             }
-
-            // This is the robust way to handle a re-triggerable event:
-            // 1. Always remove the timer from the run loop. It's safe to call even if it's not scheduled.
+            
+            // Reset release timer
             btstack_run_loop_remove_timer(&m_release_timer);
-            // 2. Set its new timeout.
             btstack_run_loop_set_timer(&m_release_timer, RELEASE_DELAY_MS);
-            // 3. Add it back to the run loop.
             btstack_run_loop_add_timer(&m_release_timer);
         }
+    }
 
-        uint64_t now_us = time_us_64();
-        bool is_key_down = (gpio_get(ENCODER_PIN_KEY) == 0);
+    // 3. Handle Button Press
+    uint64_t now_us = time_us_64();
+    bool is_key_down = (gpio_get(ENCODER_PIN_KEY) == 0);
 
-        switch (m_button_state) {
-            case ButtonState::IDLE:
-                if (is_key_down) {
-                    m_button_armed_time_us = now_us;
-                    m_button_state = ButtonState::ARMED;
-                }
-                break;
-            case ButtonState::ARMED:
-                if (!is_key_down) {
-                    m_button_state = ButtonState::IDLE;
-                } else if ((now_us - m_button_armed_time_us) > (DEBOUNCE_DELAY_MS_KEY * 1000)) {
+    switch (m_button_state) {
+        case ButtonState::IDLE:
+            if (is_key_down) {
+                m_button_armed_time_us = now_us;
+                m_button_state = ButtonState::ARMED;
+            }
+            break;
+        case ButtonState::ARMED:
+            if (!is_key_down) {
+                m_button_state = ButtonState::IDLE;
+            } else if ((now_us - m_button_armed_time_us) > (DEBOUNCE_DELAY_MS_KEY * 1000)) {
+                // Debug print for click
+                printf("Encoder Click! (BT Connected: %s)\n", connected ? "Yes" : "No");
+
+                if (connected) {
                     m_media_controller.mute();
                     
-                    // --- Also apply the fix to the mute button's release timer ---
                     btstack_run_loop_remove_timer(&m_release_timer);
                     btstack_run_loop_set_timer(&m_release_timer, RELEASE_DELAY_MS);
                     btstack_run_loop_add_timer(&m_release_timer);
-
-                    m_button_state = ButtonState::PRESSED;
                 }
-                break;
-            case ButtonState::PRESSED:
-                if (!is_key_down) {
-                    m_button_state = ButtonState::IDLE;
-                }
-                break;
-        }
+                m_button_state = ButtonState::PRESSED;
+            }
+            break;
+        case ButtonState::PRESSED:
+            if (!is_key_down) {
+                m_button_state = ButtonState::IDLE;
+            }
+            break;
     }
 }
 

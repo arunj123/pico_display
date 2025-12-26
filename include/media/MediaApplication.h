@@ -1,5 +1,3 @@
-// File: include/media/MediaApplication.h
-
 #ifndef MEDIA_APPLICATION_H
 #define MEDIA_APPLICATION_H
 
@@ -12,14 +10,12 @@
 #include "FrameProtocol.h"
 #include "config.h" 
 #include "pico/sync.h"
-#include <cassert>
 #include <array>
 
 class MediaApplication {
 public:
     MediaApplication();
     void setup();
-    // This is the correct signature for the callback
     void on_image_tile_received(const Protocol::FrameHeader& frame_header, const uint8_t* payload);
     void on_valid_tile_received(const Protocol::FrameHeader& frame_header, const uint8_t* payload);
 
@@ -43,6 +39,11 @@ private:
     ButtonState m_button_state;
     uint64_t m_button_armed_time_us;
     
+    // --- State tracking variables ---
+    bool m_tcp_server_active = false;
+    uint32_t m_last_wifi_check = 0;
+    // ------------------------------------
+
     critical_section_t m_tile_queue_crit_sec;
     static constexpr size_t TILE_QUEUE_SIZE = 4;
     std::array<Protocol::Frame, TILE_QUEUE_SIZE> m_tile_queue;

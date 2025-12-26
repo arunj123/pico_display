@@ -170,7 +170,6 @@ def main():
                 continue
             
             previous_image = None
-            last_weather_check = 0
 
             while True:
                 if (time.time() - last_weather_check) > config.WEATHER_UPDATE_INTERVAL_SECONDS:
