@@ -36,12 +36,9 @@
         <div class="status" id="status">Ready to connect...</div>
     </div>
 
-    <script>
-        // UUIDs must match the C++ .gatt file exactly
+<script>
         const SERVICE_UUID = "0000ff00-0000-1000-8000-00805f9b34fb";
         const CHARACTERISTIC_UUID = "0000ff01-0000-1000-8000-00805f9b34fb";
-        
-        // Use the Device Name defined in BleDescriptors.h / advertising data
         const DEVICE_NAME_PREFIX = "Pico"; 
 
         let bluetoothDevice;
@@ -61,9 +58,7 @@
 
         connectBtn.addEventListener('click', async () => {
             try {
-                updateStatus('Requesting Bluetooth Device...');
-                
-                // Request device with specific filter and required service
+                updateStatus('Requesting Device...');
                 bluetoothDevice = await navigator.bluetooth.requestDevice({
                     filters: [{ namePrefix: DEVICE_NAME_PREFIX }],
                     optionalServices: [SERVICE_UUID] 
@@ -71,17 +66,12 @@
 
                 bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
 
-                updateStatus('Connecting to GATT Server...');
+                updateStatus('Connecting...');
                 const server = await bluetoothDevice.gatt.connect();
-
-                updateStatus('Getting Service...');
                 const service = await server.getPrimaryService(SERVICE_UUID);
-
-                updateStatus('Getting Characteristic...');
                 wifiCharacteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
 
-                // UI Transition
-                updateStatus('Connected!');
+                updateStatus('Connected! Enter Wi-Fi details.');
                 connectionUi.classList.add('hidden');
                 formUi.classList.remove('hidden');
                 disconnectBtn.style.display = 'block';
@@ -95,47 +85,42 @@
         sendBtn.addEventListener('click', async () => {
             const ssid = document.getElementById('ssid').value;
             const password = document.getElementById('password').value;
+            if (!ssid) return updateStatus("SSID is required", true);
 
-            if (!ssid) {
-                updateStatus("SSID is required", true);
-                return;
-            }
-
-            // Format: "SSID:PASSWORD"
+            // Create payload
             const payload = `${ssid}:${password}`;
             const encoder = new TextEncoder();
             const data = encoder.encode(payload);
 
             try {
                 updateStatus('Sending credentials...');
-                // This is "Fire and Forget". It doesn't wait for a handshake, 
-                // avoiding the "Not Permitted" error in most cases.
-                await wifiCharacteristic.writeValueWithoutResponse(data); 
-                updateStatus('Sent! Device should reboot.', false);
                 
-                // Auto-disconnect after sending to be clean
-                setTimeout(() => {
-                    if (bluetoothDevice && bluetoothDevice.gatt.connected) {
-                        bluetoothDevice.gatt.disconnect();
-                    }
-                }, 1000);
+                // --- FIX: Use writeValue (With Response) ---
+                // This handles long passwords automatically and confirms receipt.
+                await wifiCharacteristic.writeValue(data);
+                // -------------------------------------------
+
+                updateStatus('Sent! Device should reboot now.', false);
+                
+                // Wait 1s then disconnect to be clean
+                setTimeout(() => disconnectDevice(), 1000);
                 
             } catch (error) {
                 console.error(error);
-                updateStatus('Write failed: ' + error.message, true);
+                // This will tell us if it's "Not Permitted" or something else
+                updateStatus('Write failed: ' + error.message, true); 
             }
         });
 
-        disconnectBtn.addEventListener('click', () => {
+        // --- Disconnect Function ---
+        function disconnectDevice() {
             if (bluetoothDevice && bluetoothDevice.gatt.connected) {
                 bluetoothDevice.gatt.disconnect();
-
-                updateStatus('Disconnected by user.');
-                // Reset UI
-                formUi.classList.add('hidden');
-                connectionUi.classList.remove('hidden');
-                disconnectBtn.style.display = 'none';
             }
+        }
+
+        disconnectBtn.addEventListener('click', () => {
+            disconnectDevice();
         });
 
         function onDisconnected() {
