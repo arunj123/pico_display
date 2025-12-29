@@ -45,7 +45,6 @@ set(COMMON_LIBS
 set(MEDIA_TARGET_NAME media_app)
 
 # A. Create a library for the Setup Profile
-# This compiles SetupProfile.c and generates setup_mode.h
 add_library(setup_profile_lib src/media/SetupProfile.c)
 pico_btstack_make_gatt_header(setup_profile_lib PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/media/setup_mode.gatt)
 
@@ -58,6 +57,8 @@ add_executable(${MEDIA_TARGET_NAME}
     src/display/Drawing.cpp
     src/display/Display.cpp
     src/net/TcpServer.cpp
+    src/net/DiscoveryServer.cpp
+    src/StatusScreen.cpp
     src/SetupDrawing.cpp
     lib/qrcodegen/qrcodegen.c
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/hids_device.c
@@ -74,7 +75,7 @@ target_link_libraries(${MEDIA_TARGET_NAME} PRIVATE
 
 pico_generate_pio_header(${MEDIA_TARGET_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/display/st7789_lcd.pio)
 
-# Generate the Normal Profile header (attached directly to executable)
+# Generate the Normal Profile header
 pico_btstack_make_gatt_header(${MEDIA_TARGET_NAME} PRIVATE 
     ${CMAKE_CURRENT_SOURCE_DIR}/src/media/media_controller.gatt
 )

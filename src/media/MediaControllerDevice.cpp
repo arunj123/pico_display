@@ -186,7 +186,7 @@ void MediaControllerDevice::setup() {
 
         printf("\n!!! BOOTING IN SETUP MODE (Profile: setup_mode.gatt) !!!\n");
         printf("┌──────────────────────────────────────────────────────────────────┐\n");
-        printf("│                      PICO SETUP REQUIRED                         │\n");
+        printf("│                       PICO SETUP REQUIRED                        │\n");
         printf("│                                                                  │\n");
         printf("│   1. Open URL to configure Wi-Fi:                                │\n");
         printf("│      %s   │\n", SETUP_WEB_URL);
@@ -237,6 +237,14 @@ void MediaControllerDevice::setup() {
         gap_advertisements_set_data(getAdvertisingDataSize(), (uint8_t*)getAdvertisingData());
         gap_advertisements_enable(1);
     }
+}
+
+// --- Exit Button Handler ---
+void MediaControllerDevice::forceExitSetupMode() {
+    printf("[Setup] Force Exit triggered by Button. Rebooting...\n");
+    BOOT_FLAG_REGISTER = 0; // Ensure setup flag is cleared
+    watchdog_enable(1, 0);  // Trigger immediate reboot
+    while(1);
 }
 
 void MediaControllerDevice::handlePacket(uint8_t packet_type, uint16_t channel, uint8_t* packet, uint16_t size) {

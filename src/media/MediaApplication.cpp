@@ -9,6 +9,8 @@
 #include "pico/cyw43_arch.h"
 #include "lwip/ip4_addr.h"
 #include "hardware/watchdog.h"
+#include "StatusScreen.h"
+#include "DiscoveryServer.h"
 #include <algorithm>
 
 // This pre-computed table is for the standard CRC-32 algorithm (as used in PNG, Ethernet)
@@ -90,44 +92,38 @@ MediaApplication::MediaApplication() :
     critical_section_init(&m_tile_queue_crit_sec);
 }
 
-// --- The run() function ---
 void MediaApplication::setup() {
+    // --- UI HELPER ---
+    StatusScreen statusUI(m_drawing);
+
     // --- STAGE 1: HARDWARE INITIALIZATION ---
-    printf("Initializing Rotary Encoder...\n");
+    printf("Initializing Hardware...\n");
     m_encoder.init();
-
-    printf("Initializing Display...\n");
     m_display.init();
-    m_display.fillScreen(0);
-
+    
+    // Show Boot Screen
+    statusUI.show(StatusScreen::Type::BOOT);
 
     // Check Flash for Credentials
     WifiCredentials creds;
     bool has_creds = WifiConfig::load(creds);
-
-    const char* target_ssid = has_creds ? creds.ssid : WIFI_SSID; // Fallback to config.h if flash empty
+    const char* target_ssid = has_creds ? creds.ssid : WIFI_SSID;
     const char* target_pass = has_creds ? creds.password : WIFI_PASSWORD;
 
     printf("Target Wi-Fi SSID: %s\n", target_ssid);
     
     // --- STAGE 2: BTstack & APPLICATION SOFTWARE SETUP ---
-    printf("Initializing BTstack components...\n");
     BtStackManager::getInstance().registerHandler(&m_media_controller);
     m_media_controller.setup();
 
     // --- Skip Wi-Fi if in Setup Mode ---
     if (m_media_controller.isSetupMode()) {
-        printf("Skipping Wi-Fi Connection (Setup Mode)\n");
-        m_drawing.drawString(10, 10, "SETUP MODE: Connect via Web", 0xF800, &font_freesans_16);
-        
-        // --- CRITICAL FIX: RETURN TO MAIN LOOP ---
-        // We MUST return here so that main() can call hci_power_control(HCI_POWER_ON)
-        // and btstack_run_loop_execute().
-        // If we block here, the BLE radio never turns on.
+        // Setup Mode UI is handled inside MediaControllerDevice::setup -> SetupDrawing
+        // Just return to main loop
         return; 
     }
 
-    // Set up application-specific timers
+    // Set up timers
     m_release_timer.context = this;
     btstack_run_loop_set_timer_handler(&m_release_timer, &MediaApplication::release_handler_forwarder);
     
@@ -136,43 +132,40 @@ void MediaApplication::setup() {
     btstack_run_loop_set_timer(&m_battery_timer, 30000);
     btstack_run_loop_add_timer(&m_battery_timer);
 
-    // Set up the main polling timer, which will be the application's heartbeat
     m_poll_timer.context = this;
     btstack_run_loop_set_timer_handler(&m_poll_timer, &MediaApplication::poll_handler_forwarder);
-    btstack_run_loop_set_timer(&m_poll_timer, 10); // Start the first poll in 10ms
+    btstack_run_loop_set_timer(&m_poll_timer, 10);
     btstack_run_loop_add_timer(&m_poll_timer);
 
-    // --- STAGE 3: WI-FI CONNECTION (Blocking call, safe to do here) ---
+    // --- STAGE 3: WI-FI CONNECTION ---
     cyw43_arch_enable_sta_mode();
-    m_drawing.drawString(10, 10, "Connecting to Wi-Fi...", 0xFFFF, &font_freesans_16);
+    
+    // Show Connecting Screen
+    statusUI.show(StatusScreen::Type::WIFI_CONNECTING, target_ssid);
     printf("Connecting to Wi-Fi network: %s\n", target_ssid);
 
     if (cyw43_arch_wifi_connect_timeout_ms(target_ssid, target_pass, CYW43_AUTH_WPA2_AES_PSK, 30000)) {
         printf("Failed to connect to Wi-Fi.\n");
-        m_drawing.fillRect(0, 10, 320, 20, 0);
-        m_drawing.drawString(10, 10, "Wi-Fi connection failed. Use BLE to configure.", 0xF800, &font_freesans_16);
+        // Show Error Screen
+        statusUI.show(StatusScreen::Type::WIFI_ERROR);
     } else {
-        printf("Connected to Wi-Fi. IP: %s\n", ip4addr_ntoa(netif_ip4_addr(&cyw43_state.netif[0])));
-        cyw43_wifi_pm(&cyw43_state, CYW43_PERFORMANCE_PM);
-        m_tcp_server.init(4242);
-        m_drawing.fillRect(0, 10, 320, 20, 0);
-        m_drawing.drawString(10, 10, "Waiting for host...", 0x07E0, &font_freesans_16);
-    }
-}
+        char ip_str[20];
+        const ip4_addr_t* ip = netif_ip4_addr(&cyw43_state.netif[0]);
+        snprintf(ip_str, sizeof(ip_str), "%s", ip4addr_ntoa(ip));
+        printf("Connected. IP: %s\n", ip_str);
 
-void MediaApplication::on_valid_tile_received(const Protocol::FrameHeader& frame_header, const uint8_t* payload) {
-    // This is called from the ISR. It must be fast. It just queues the data.
-    critical_section_enter_blocking(&m_tile_queue_crit_sec);
-    uint8_t next_head = (m_queue_head + 1) % TILE_QUEUE_SIZE;
-    if (next_head == m_queue_tail) {
-        printf("WARN: Tile queue is full. Dropping tile.\n");
-    } else {
-        Protocol::Frame& tile_slot = m_tile_queue[m_queue_head];
-        tile_slot.header = frame_header;
-        memcpy(tile_slot.payload.data(), payload, frame_header.payload_length);
-        m_queue_head = next_head;
+        cyw43_wifi_pm(&cyw43_state, CYW43_PERFORMANCE_PM);
+        
+        // Start TCP Server
+        m_tcp_server.init(4242);
+        m_tcp_server_active = true;
+
+        // Start Discovery Server (UDP)
+        DiscoveryServer::getInstance().init();
+
+        // Show Success/Ready Screen with IP
+        statusUI.show(StatusScreen::Type::WIFI_CONNECTED, ip_str);
     }
-    critical_section_exit(&m_tile_queue_crit_sec);
 }
 
 // --- poll_handler (The Consumer) ---
@@ -201,19 +194,31 @@ void MediaApplication::poll_handler() {
 
         if (link_status == CYW43_LINK_UP) {
             if (!m_tcp_server_active) {
-                printf("Wi-Fi UP. Starting TCP Server...\n");
+                printf("Wi-Fi UP. Starting Services...\n");
                 if (m_tcp_server.init(4242)) {
                     m_tcp_server_active = true;
-                    // ... drawing commands ...
-                    printf("TCP Server Listening\n");
+                    DiscoveryServer::getInstance().init();
+                    
+                    // Show IP again if we reconnected
+                    char ip_str[20];
+                    const ip4_addr_t* ip = netif_ip4_addr(&cyw43_state.netif[0]);
+                    snprintf(ip_str, sizeof(ip_str), "%s", ip4addr_ntoa(ip));
+                    
+                    StatusScreen statusUI(m_drawing);
+                    statusUI.show(StatusScreen::Type::WIFI_CONNECTED, ip_str);
                 }
             }
         } else {
             // Wi-Fi Lost
             if (m_tcp_server_active) {
-                printf("Wi-Fi Lost. Stopping TCP Server.\n");
-                m_tcp_server.close(); // <--- CLEANUP
+                printf("Wi-Fi Lost. Stopping Services.\n");
+                m_tcp_server.close();
+                DiscoveryServer::getInstance().stop();
                 m_tcp_server_active = false;
+
+                // Show Disconnected Screen
+                StatusScreen statusUI(m_drawing);
+                statusUI.show(StatusScreen::Type::DISCONNECTED);
             }
             
             // Reconnect logic...
@@ -270,6 +275,9 @@ void MediaApplication::on_image_tile_received(const Protocol::FrameHeader& frame
     critical_section_exit(&m_tile_queue_crit_sec);
 }
 
+void MediaApplication::on_valid_tile_received(const Protocol::FrameHeader& frame_header, const uint8_t* payload) {
+    on_image_tile_received(frame_header, payload);
+}
 
 void MediaApplication::handle_encoder() {
     bool connected = m_media_controller.isConnected();
@@ -328,8 +336,8 @@ void MediaApplication::handle_encoder() {
                 // Button is still held down. Check for Long Press (3s).
                 if ((now_us - m_button_armed_time_us) > (3000 * 1000)) {
                     printf("Long Press: Entering Setup Mode...\n");
-                    m_media_controller.enterSetupMode();
-                    m_button_state = ButtonState::WAIT_FOR_RELEASE;
+                m_media_controller.enterSetupMode();
+                m_button_state = ButtonState::WAIT_FOR_RELEASE;
                 }
             }
             break;

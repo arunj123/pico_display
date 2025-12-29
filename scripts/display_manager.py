@@ -14,16 +14,46 @@ class DeviceManager:
     """Manages robust, fire-and-forget TCP communication with the Pico W device."""
     def __init__(self):
         self.sock = None
+        self.device_ip = config.PICO_IP # Start with config, but override via discovery
+        self.device_port = config.PICO_PORT
+
+    def find_device(self, timeout=3.0) -> bool:
+        """Broadcasts UDP packet to find the Pico W automatically."""
+        print(f"Scanning for Pico W on local network (UDP 4243)...")
+        udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        udp_sock.settimeout(timeout)
+        
+        try:
+            message = b"PICO_DISCOVER"
+            # Broadcast to all
+            udp_sock.sendto(message, ('<broadcast>', 4243))
+            
+            while True:
+                data, addr = udp_sock.recvfrom(1024)
+                if data == b"PICO_HERE":
+                    print(f"Found Device at {addr[0]}!")
+                    self.device_ip = addr[0]
+                    return True
+        except socket.timeout:
+            print("Discovery timed out. No device found.")
+        except Exception as e:
+            print(f"Discovery error: {e}")
+        finally:
+            udp_sock.close()
+        
+        return False
 
     def connect(self) -> bool:
         if self.sock: return True
+        
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            # A shorter timeout for the initial connection is fine
             self.sock.settimeout(5.0) 
-            print(f"Connecting to {config.PICO_IP}:{config.PICO_PORT}...")
-            self.sock.connect((config.PICO_IP, config.PICO_PORT))
-            # Set a default timeout for all subsequent socket operations (like waiting for ACK)
+            
+            print(f"Connecting to {self.device_ip}:{self.device_port}...")
+            self.sock.connect((self.device_ip, self.device_port))
+            
             self.sock.settimeout(15.0) 
             print("Connected.")
             return True
@@ -32,6 +62,7 @@ class DeviceManager:
             self.sock = None
             return False
 
+    # ... [Rest of class methods send_image_diff, _send_frame_and_wait_for_ack, close are unchanged] ...
     def send_image_diff(self, new_image, previous_image):
         if not self.sock: return False, previous_image
 
@@ -72,15 +103,12 @@ class DeviceManager:
             end_index = (y + tile_height) * bytes_per_row
             tile_pixel_data = pixel_data_full[start_index:end_index]
             
-            # CRC is calculated on the raw, unpadded pixel data.
             crc = zlib.crc32(tile_pixel_data)
             
             tile_x_global, tile_y_global = offset_x, offset_y + y
             print(f"  - Sending tile {tile_count+1}: Pos({tile_x_global},{tile_y_global}), Size({sub_width}x{tile_height}), CRC(0x{crc:08X})")
             
             tile_header = struct.pack(config.IMAGE_TILE_HEADER_FORMAT, tile_x_global, tile_y_global, sub_width, tile_height, crc)
-            
-            # --- Send the header and the raw pixel data directly. No more padding. ---
             payload = tile_header + tile_pixel_data
             
             if not self._send_frame_and_wait_for_ack(config.FRAME_TYPE_IMAGE_TILE, payload):
@@ -96,12 +124,9 @@ class DeviceManager:
         return True, reconstructed_image
 
     def _send_frame_and_wait_for_ack(self, frame_type, payload):
-        """Sends a frame and then blocks until an ACK is received."""
         try:
-            # Send the data frame
             frame = pack_frame(frame_type, payload)
             self.sock.sendall(frame)
-            # Wait for the ACK frame
             response = self.sock.recv(config.FRAME_HEADER_SIZE)
             if len(response) < config.FRAME_HEADER_SIZE:
                 print("  - Error: Incomplete ACK response from device.")
@@ -114,7 +139,6 @@ class DeviceManager:
                 return False
             
             if rcv_type == config.FRAME_TYPE_TILE_ACK:
-                # print("  - ACK OK.") # Optional: for debugging
                 return True
             elif rcv_type == config.FRAME_TYPE_TILE_NACK:
                 print("  - Error: Received NACK from device (checksum mismatch).")
@@ -129,16 +153,6 @@ class DeviceManager:
             return False
         except OSError as e:
             print(f"Socket error during send/receive: {e}")
-            self.close()
-            return False
-
-    def _send_frame(self, frame_type, payload):
-        try:
-            frame = pack_frame(frame_type, payload)
-            self.sock.sendall(frame)
-            return True
-        except OSError as e:
-            print(f"Socket error during send: {e}")
             self.close()
             return False
 
@@ -163,9 +177,17 @@ def main():
     current_weather = None
     last_weather_check = 0
 
+    # --- DISCOVERY PHASE ---
+    # Attempt to find device. If not found, use default from config.
+    if not manager.find_device():
+        print(f"Using default IP from config: {manager.device_ip}")
+
     while True:
         try:
             if not manager.connect():
+                # On connection failure, try discovery again before retrying connect
+                print("Retrying discovery...")
+                manager.find_device()
                 time.sleep(5)
                 continue
             

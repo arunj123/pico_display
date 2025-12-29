@@ -16,6 +16,8 @@ public:
     bool isSetupMode() const { return m_setup_mode; }
 
     void enterSetupMode();
+    void forceExitSetupMode(); // Public method for button exit
+    
     void setBatteryLevel(uint8_t level);
 
     // Media Control Methods
