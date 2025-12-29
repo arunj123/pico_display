@@ -1,12 +1,12 @@
 #ifndef MEDIA_APPLICATION_H
 #define MEDIA_APPLICATION_H
 
+#include "Drawing.h"
 #include "MediaControllerDevice.h"
 #include "RotaryEncoder.h"
 #include "TcpServer.h"
 #include "btstack.h"
 #include "Display.h"
-#include "Drawing.h"
 #include "FrameProtocol.h"
 #include "config.h" 
 #include "pico/sync.h"
@@ -24,10 +24,10 @@ private:
     void poll_handler();
     static void poll_handler_forwarder(btstack_timer_source_t* ts);
 
-    MediaControllerDevice m_media_controller;
     RotaryEncoder m_encoder;
     St7789Display m_display;
     Drawing m_drawing;
+    MediaControllerDevice m_media_controller;
     TcpServer m_tcp_server;
 
     btstack_timer_source_t m_poll_timer;

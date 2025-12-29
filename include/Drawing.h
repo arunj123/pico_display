@@ -17,6 +17,10 @@ public:
 
     Drawing(St7789Display& display);
 
+    // get width and height
+    inline uint16_t getWidth() const { return m_display.getWidth(); }
+    inline uint16_t getHeight() const { return m_display.getHeight(); }
+
     void fillRect(uint16_t x, uint16_t y, uint16_t width, uint16_t height, uint16_t color);
     void drawString(uint16_t x, uint16_t y, const char* str, uint16_t color, const custom_font_t* font);
     

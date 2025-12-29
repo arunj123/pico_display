@@ -9,7 +9,7 @@
 #include "ble/gatt-service/battery_service_server.h"
 #include "pico/stdlib.h"
 #include "pico/cyw43_arch.h"
-#include "pico/unique_id.h" // Required for unique board ID
+#include "pico/unique_id.h" 
 #include "btstack_run_loop.h"
 #include "btstack_event.h"
 #include "btstack_crypto.h" 
@@ -24,6 +24,13 @@ extern "C" uint16_t get_setup_wifi_handle(void);
 #define SETUP_MODE_MAGIC 0x7E57CAFE
 #define BOOT_FLAG_REGISTER (watchdog_hw->scratch[7])
 
+// Define the Setup URL for easy access
+static const char* SETUP_WEB_URL = "https://arunj123.github.io/pico_display/web/";
+
+// Timeout configuration
+static const uint32_t SETUP_TIMEOUT_MS = 180000; // 3 Minutes
+static absolute_time_t m_last_activity_time;
+
 static uint16_t active_wifi_handle = 0;
 
 const uint8_t setup_adv_data[] = {
@@ -35,6 +42,10 @@ static std::string temp_ssid = "";
 static std::string temp_pass = "";
 static btstack_timer_source_t setup_poll_timer;
 
+// Reboot scheduling to allow BLE Write Response to flush
+static bool m_reboot_scheduled = false;
+static absolute_time_t m_reboot_deadline;
+
 namespace {
     constexpr uint8_t REPORT_MASK_VOLUME_UP     = 1 << 0;
     constexpr uint8_t REPORT_MASK_VOLUME_DOWN   = 1 << 1;
@@ -44,8 +55,33 @@ namespace {
     constexpr uint8_t REPORT_MASK_PREV_TRACK    = 1 << 5;
 }
 
+// Constructor Implementation - Updated to use SetupDrawing
+MediaControllerDevice::MediaControllerDevice(Drawing& drawing) 
+    : m_setupDrawing(drawing) 
+{
+}
+
 static void setup_poll_handler(btstack_timer_source_t *ts) {
     cyw43_arch_poll(); 
+
+    // 1. Check for Reboot Schedule (Save/Exit Success)
+    if (m_reboot_scheduled) {
+        if (absolute_time_diff_us(get_absolute_time(), m_reboot_deadline) < 0) {
+            printf("[BLE] Reboot scheduled. Resetting system now...\n");
+            stdio_flush();
+            watchdog_enable(1, 0);
+            while(1);
+        }
+    } 
+    // 2. Check for Inactivity Timeout (Only if reboot isn't already scheduled)
+    else if (absolute_time_diff_us(m_last_activity_time, get_absolute_time()) > (SETUP_TIMEOUT_MS * 1000LL)) {
+        printf("[BLE] Setup Timeout (%d sec inactivity). Exiting Setup Mode...\n", SETUP_TIMEOUT_MS / 1000);
+        stdio_flush();
+        BOOT_FLAG_REGISTER = 0; // Clear setup flag to boot normally next time
+        watchdog_enable(1, 0);
+        while(1);
+    }
+
     btstack_run_loop_set_timer(ts, 5); 
     btstack_run_loop_add_timer(ts);
 }
@@ -54,9 +90,6 @@ static void start_setup_advertising() {
     printf("[BLE] Stack Ready. Configuring Advertising...\n");
     stdio_flush();
 
-    // --- FIX: Use Pico Unique ID for Stable Address ---
-    // Instead of a random address that changes on every boot (forcing re-pairing),
-    // we use the Pico's unique Flash ID to generate a consistent address.
     bd_addr_t setup_addr;
     pico_unique_board_id_t board_id;
     pico_get_unique_board_id(&board_id);
@@ -84,6 +117,9 @@ int att_write_callback(hci_con_handle_t con_handle, uint16_t att_handle, uint16_
     UNUSED(transaction_mode);
     UNUSED(offset);
 
+    // Reset activity timer on any write command
+    m_last_activity_time = get_absolute_time();
+
     if (att_handle == 0 || buffer == nullptr || buffer_size == 0) return 0;
 
     printf("[BLE] Write: Handle=0x%04X, Len=%d\n", att_handle, buffer_size);
@@ -102,16 +138,27 @@ int att_write_callback(hci_con_handle_t con_handle, uint16_t att_handle, uint16_
         } 
         else if (payload == "SAVE") {
             if (!temp_ssid.empty()) {
-                printf("[BLE] Saving config and rebooting to NORMAL mode...\n");
+                printf("[BLE] Valid SSID received: %s\n", temp_ssid.c_str());
+                printf("[BLE] Saving config to Flash...\n");
+                
                 WifiConfig::save(temp_ssid.c_str(), temp_pass.c_str());
                 BOOT_FLAG_REGISTER = 0;
-                stdio_flush(); 
-                sleep_ms(100); 
-                watchdog_enable(1, 0); 
-                while(1);
+                
+                printf("[BLE] Save Complete. Scheduling reboot in 1500ms...\n");
+                m_reboot_deadline = make_timeout_time_ms(1500);
+                m_reboot_scheduled = true;
+                
             } else {
                 printf("[BLE] Error: Cannot save empty SSID\n");
             }
+        }
+        else if (payload == "EXIT") {
+            printf("[BLE] Exit command received. Rebooting without saving...\n");
+            BOOT_FLAG_REGISTER = 0; // Clear setup flag
+            
+            // Schedule reboot to allow Write Response to go back to Web App
+            m_reboot_deadline = make_timeout_time_ms(1500);
+            m_reboot_scheduled = true;
         }
         return 0; 
     }
@@ -133,10 +180,22 @@ void MediaControllerDevice::setup() {
     bool is_setup_mode = (BOOT_FLAG_REGISTER == SETUP_MODE_MAGIC);
 
     if (is_setup_mode) {
-        printf("\n!!! BOOTING IN SETUP MODE (Profile: setup_mode.gatt) !!!\n");
         m_setup_mode = true;
+        m_last_activity_time = get_absolute_time(); // Initialize timeout timer
         BOOT_FLAG_REGISTER = 0;
 
+        printf("\n!!! BOOTING IN SETUP MODE (Profile: setup_mode.gatt) !!!\n");
+        printf("┌──────────────────────────────────────────────────────────────────┐\n");
+        printf("│                      PICO SETUP REQUIRED                         │\n");
+        printf("│                                                                  │\n");
+        printf("│   1. Open URL to configure Wi-Fi:                                │\n");
+        printf("│      %s   │\n", SETUP_WEB_URL);
+        printf("│                                                                  │\n");
+        printf("│   2. Connect to Bluetooth Device: 'Pico Setup'                   │\n");
+        printf("│                                                                  │\n");
+        printf("│   * Setup mode will timeout in %d seconds if inactive.           │\n", SETUP_TIMEOUT_MS / 1000);
+        printf("└──────────────────────────────────────────────────────────────────┘\n");
+        
         // Security: BONDING ENABLED
         sm_set_io_capabilities(IO_CAPABILITY_NO_INPUT_NO_OUTPUT);
         sm_set_authentication_requirements(SM_AUTHREQ_SECURE_CONNECTION | SM_AUTHREQ_BONDING); 
@@ -149,6 +208,10 @@ void MediaControllerDevice::setup() {
         device_information_service_server_init();
 
         printf("[BLE] Configured for Setup. Returning to App to draw UI...\n");
+        
+        // --- DRAW USING SetupDrawing CLASS ---
+        m_setupDrawing.showSetupScreen(SETUP_WEB_URL);
+        
         stdio_flush();
         
         setup_poll_timer.process = &setup_poll_handler;
@@ -192,9 +255,10 @@ void MediaControllerDevice::handlePacket(uint8_t packet_type, uint16_t channel, 
                  uint16_t conn_handle = hci_subevent_le_connection_complete_get_connection_handle(packet);
                  printf("[BLE] LE Connection Complete. Handle: 0x%04X\n", conn_handle);
                  
-                 // --- FIX: PROACTIVELY REQUEST SECURITY ---
-                 // Don't wait for Windows to hit the characteristic and fail. 
-                 // Force the pairing process to start immediately upon connection.
+                 // Reset inactivity timer on connection
+                 m_last_activity_time = get_absolute_time();
+                 
+                 // PROACTIVELY REQUEST SECURITY
                  if (m_setup_mode) {
                      printf("[BLE] Requesting Security (Pairing)...\n");
                      sm_send_security_request(conn_handle);

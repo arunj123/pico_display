@@ -81,6 +81,7 @@ MediaApplication::MediaApplication() :
     m_encoder(ENCODER_PIN_A, ENCODER_PIN_B, ENCODER_PIN_KEY),
     m_display(pio1, DISPLAY_PIN_SDA, DISPLAY_PIN_SCL, DISPLAY_PIN_CS, DISPLAY_PIN_DC, DISPLAY_PIN_RESET, DisplayOrientation::LANDSCAPE),
     m_drawing(m_display),
+    m_media_controller(m_drawing),
     m_tcp_server(this),
     m_battery_level(100),
     m_button_state(ButtonState::IDLE),

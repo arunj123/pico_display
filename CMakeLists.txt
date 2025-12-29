@@ -84,6 +84,8 @@ add_executable(${MEDIA_TARGET_NAME}
     src/display/Drawing.cpp
     src/display/Display.cpp
     src/net/TcpServer.cpp
+    src/SetupDrawing.cpp
+    lib/qrcodegen/qrcodegen.c
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/hids_device.c
     ${COMMON_SOURCES}
 )
@@ -110,6 +112,7 @@ target_include_directories(${MEDIA_TARGET_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/include/ble
     ${CMAKE_CURRENT_LIST_DIR}/include/media
     ${CMAKE_CURRENT_LIST_DIR}/include/net
+    ${CMAKE_CURRENT_LIST_DIR}/lib/qrcodegen
     ${CMAKE_CURRENT_LIST_DIR}/src/pico
 )
 
