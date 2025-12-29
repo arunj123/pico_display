@@ -114,6 +114,18 @@ void MediaApplication::setup() {
     BtStackManager::getInstance().registerHandler(&m_media_controller);
     m_media_controller.setup();
 
+    // --- Skip Wi-Fi if in Setup Mode ---
+    if (m_media_controller.isSetupMode()) {
+        printf("Skipping Wi-Fi Connection (Setup Mode)\n");
+        m_drawing.drawString(10, 10, "SETUP MODE: Connect via Web", 0xF800, &font_freesans_16);
+        
+        // --- CRITICAL FIX: RETURN TO MAIN LOOP ---
+        // We MUST return here so that main() can call hci_power_control(HCI_POWER_ON)
+        // and btstack_run_loop_execute().
+        // If we block here, the BLE radio never turns on.
+        return; 
+    }
+
     // Set up application-specific timers
     m_release_timer.context = this;
     btstack_run_loop_set_timer_handler(&m_release_timer, &MediaApplication::release_handler_forwarder);
@@ -167,6 +179,14 @@ void MediaApplication::poll_handler() {
     watchdog_update();
     cyw43_arch_poll();
     
+    if (m_media_controller.isSetupMode()) {
+        // Just re-arm the timer and exit. 
+        // This prevents Wi-Fi reconnection and drawing updates.
+        btstack_run_loop_set_timer(&m_poll_timer, 10);
+        btstack_run_loop_add_timer(&m_poll_timer);
+        return; 
+    }
+
     // Only poll server if active to check for timeouts
     if (m_tcp_server_active) {
         m_tcp_server.poll();

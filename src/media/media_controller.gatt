@@ -1,24 +1,16 @@
-// File: media_controller.gatt
+// File: src/media/media_controller.gatt
+// Normal Mode Profile: Standard HID Keyboard.
 
 PRIMARY_SERVICE, GAP_SERVICE
-CHARACTERISTIC, GAP_DEVICE_NAME, READ, "Pico Media Controller"
+CHARACTERISTIC, GAP_DEVICE_NAME, READ, "Pico MediaCtl"
 
-// add Battery Service
+// Standard Services
 #import <battery_service.gatt>
-
-// add Device ID Service
 #import <device_information_service.gatt>
-
-// add HID Service
 #import <hids.gatt>
 
-// Custom Wi-Fi Setup Service
-PRIMARY_SERVICE, 0000FF00-0000-1000-8000-00805F9B34FB
-
-// Wi-Fi Credentials Characteristic
-// UUID: 0000FF01-0000-1000-8000-00805F9B34FB
-// MUST HAVE: WRITE | WRITE_WITHOUT_RESPONSE
-CHARACTERISTIC, 0000FF01-0000-1000-8000-00805F9B34FB, WRITE | WRITE_WITHOUT_RESPONSE, DYNAMIC
+// NOTE: Wi-Fi Setup Service is NOT present here.
+// To configure Wi-Fi, the user must reboot into Setup Mode.
 
 PRIMARY_SERVICE, GATT_SERVICE
 CHARACTERISTIC, GATT_DATABASE_HASH, READ,

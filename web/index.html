@@ -6,13 +6,13 @@
     <title>Pico W Network Setup</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f9; display: flex; flex-direction: column; align-items: center; padding-top: 50px; }
-        .container { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 300px; text-align: center; }
+        .container { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 350px; text-align: center; }
         h2 { margin-top: 0; color: #333; }
         input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
         button { width: 100%; padding: 10px; background-color: #007bff; color: white; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; margin-top: 10px; }
         button:disabled { background-color: #ccc; cursor: not-allowed; }
         button#disconnect { background-color: #dc3545; display: none; }
-        .status { margin-top: 15px; font-size: 0.9em; color: #666; min-height: 20px; }
+        .status { margin-top: 15px; font-size: 0.9em; color: #666; min-height: 20px; white-space: pre-wrap; word-wrap: break-word;}
         .hidden { display: none; }
     </style>
 </head>
@@ -20,7 +20,7 @@
 
     <div class="container">
         <h2>Wi-Fi Setup</h2>
-        <p>Connect to your Pico W Media Controller to update Wi-Fi settings.</p>
+        <p>Connect to "Pico Setup" to configure Wi-Fi.</p>
 
         <div id="connection-ui">
             <button id="connectBtn">Connect to Device</button>
@@ -43,6 +43,7 @@
 
         let bluetoothDevice;
         let wifiCharacteristic;
+        let isUserDisconnecting = false;
 
         const connectBtn = document.getElementById('connectBtn');
         const sendBtn = document.getElementById('sendBtn');
@@ -53,11 +54,32 @@
 
         function updateStatus(msg, isError = false) {
             statusDiv.textContent = msg;
-            statusDiv.style.color = isError ? 'red' : '#666';
+            statusDiv.style.color = isError ? '#d32f2f' : '#28a745'; // Darker red for errors, green for success status
+            if (!isError && msg === 'Ready to connect...') statusDiv.style.color = '#666';
+        }
+
+        function handleError(error, context) {
+            console.error(context, error);
+            let userMsg = error.message;
+
+            if (error.name === 'NetworkError') {
+                if (userMsg.includes('GATT operation failed')) {
+                    userMsg = "Device disconnected or operation failed unexpectedly.\n(Try resetting the Pico)";
+                } else if (userMsg.includes('Connection failed')) {
+                    userMsg = "Could not connect to device.\nMake sure it is in range and in Setup Mode.";
+                }
+            } else if (error.name === 'SecurityError') {
+                userMsg = "Security/Pairing failed.\nPlease 'Remove Device' from your OS Bluetooth settings and try again.";
+            } else if (error.name === 'NotFoundError') {
+                userMsg = "Cancelled by user.";
+            }
+
+            updateStatus(`${context}: ${userMsg}`, true);
         }
 
         connectBtn.addEventListener('click', async () => {
             try {
+                isUserDisconnecting = false;
                 updateStatus('Requesting Device...');
                 bluetoothDevice = await navigator.bluetooth.requestDevice({
                     filters: [{ namePrefix: DEVICE_NAME_PREFIX }],
@@ -68,7 +90,11 @@
 
                 updateStatus('Connecting...');
                 const server = await bluetoothDevice.gatt.connect();
+                
+                updateStatus('Discovering Services...');
                 const service = await server.getPrimaryService(SERVICE_UUID);
+                
+                updateStatus('Getting Characteristic...');
                 wifiCharacteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
 
                 updateStatus('Connected! Enter Wi-Fi details.');
@@ -77,8 +103,10 @@
                 disconnectBtn.style.display = 'block';
 
             } catch (error) {
-                console.error(error);
-                updateStatus('Connection failed: ' + error.message, true);
+                handleError(error, 'Connection failed');
+                if (bluetoothDevice && bluetoothDevice.gatt.connected) {
+                    bluetoothDevice.gatt.disconnect();
+                }
             }
         });
 
@@ -87,34 +115,52 @@
             const password = document.getElementById('password').value;
             if (!ssid) return updateStatus("SSID is required", true);
 
-            // Create payload
-            const payload = `${ssid}:${password}`;
-            const encoder = new TextEncoder();
-            const data = encoder.encode(payload);
+            const enc = new TextEncoder();
 
             try {
-                updateStatus('Sending credentials...');
-                
-                // --- FIX: Use writeValue (With Response) ---
-                // This handles long passwords automatically and confirms receipt.
-                await wifiCharacteristic.writeValue(data);
-                // -------------------------------------------
+                // Send Chunk 1: SSID
+                updateStatus('Sending SSID...');
+                try {
+                    // CHANGED: Using writeValueWithResponse to catch errors!
+                    await wifiCharacteristic.writeValueWithResponse(enc.encode("S:" + ssid));
+                } catch (e) {
+                    throw new Error("Failed to write SSID: " + e.message);
+                }
+                await new Promise(r => setTimeout(r, 50)); 
 
-                updateStatus('Sent! Device should reboot now.', false);
+                // Send Chunk 2: Password (if exists)
+                if (password) {
+                    updateStatus('Sending Password...');
+                    try {
+                        await wifiCharacteristic.writeValueWithResponse(enc.encode("P:" + password));
+                    } catch (e) {
+                        throw new Error("Failed to write Password: " + e.message);
+                    }
+                    await new Promise(r => setTimeout(r, 50));
+                }
+
+                // Send Chunk 3: Command
+                updateStatus('Saving...');
+                try {
+                    await wifiCharacteristic.writeValueWithResponse(enc.encode("SAVE"));
+                } catch (e) {
+                    throw new Error("Failed to send SAVE command: " + e.message);
+                }
+
+                updateStatus('Done! Device rebooting.');
                 
-                // Wait 1s then disconnect to be clean
-                setTimeout(() => disconnectDevice(), 1000);
-                
+                // Expected disconnect after save
+                isUserDisconnecting = true; 
+                setTimeout(() => disconnectDevice(), 1500);
+
             } catch (error) {
-                console.error(error);
-                // This will tell us if it's "Not Permitted" or something else
-                updateStatus('Write failed: ' + error.message, true); 
+                handleError(error, 'Write failed');
             }
         });
-
-        // --- Disconnect Function ---
+        
         function disconnectDevice() {
             if (bluetoothDevice && bluetoothDevice.gatt.connected) {
+                isUserDisconnecting = true;
                 bluetoothDevice.gatt.disconnect();
             }
         }
@@ -124,10 +170,16 @@
         });
 
         function onDisconnected() {
-            updateStatus('Device disconnected.');
+            if (!isUserDisconnecting) {
+                // Unexpected disconnect
+                updateStatus('Device disconnected unexpectedly.\n(Check serial logs for error 0x13 or security rejection)', true);
+            } else {
+                updateStatus('Ready to connect...');
+            }
             formUi.classList.add('hidden');
             connectionUi.classList.remove('hidden');
             disconnectBtn.style.display = 'none';
+            isUserDisconnecting = false;
         }
     </script>
 </body>

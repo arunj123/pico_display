@@ -2,84 +2,225 @@
 
 #include "MediaControllerDevice.h"
 #include "hardware/watchdog.h"
+#include "hardware/structs/watchdog.h" 
 #include "WifiConfig.h"
-#include "media_controller.h"
+#include "media_controller.h" 
 #include "BleDescriptors.h"
 #include "ble/gatt-service/battery_service_server.h"
-#include "pico/stdlib.h" // For sleep_ms
+#include "pico/stdlib.h"
+#include "pico/cyw43_arch.h"
+#include "pico/unique_id.h" // Required for unique board ID
+#include "btstack_run_loop.h"
+#include "btstack_event.h"
+#include "btstack_crypto.h" 
 
 #include <string>
 #include <cstring>
 #include <cstdio>
 
-namespace {
-    // Bitmasks for HID reports
-    constexpr uint8_t REPORT_MASK_VOLUME_UP   = 1 << 0;
-    constexpr uint8_t REPORT_MASK_VOLUME_DOWN = 1 << 1;
-    constexpr uint8_t REPORT_MASK_MUTE        = 1 << 2;
-    constexpr uint8_t REPORT_MASK_PLAY_PAUSE  = 1 << 3;
-    constexpr uint8_t REPORT_MASK_NEXT_TRACK  = 1 << 4;
-    constexpr uint8_t REPORT_MASK_PREV_TRACK  = 1 << 5;
-}
+extern "C" const uint8_t * get_setup_profile_data(void);
+extern "C" uint16_t get_setup_wifi_handle(void);
 
-// Define a simpler advertising packet for Setup Mode (No HID UUIDs)
+#define SETUP_MODE_MAGIC 0x7E57CAFE
+#define BOOT_FLAG_REGISTER (watchdog_hw->scratch[7])
+
+static uint16_t active_wifi_handle = 0;
+
 const uint8_t setup_adv_data[] = {
-    // Flags: General Discoverable
     0x02, BLUETOOTH_DATA_TYPE_FLAGS, 0x06,
-    // Name: Pico Setup
     0x0B, BLUETOOTH_DATA_TYPE_COMPLETE_LOCAL_NAME, 'P', 'i', 'c', 'o', ' ', 'S', 'e', 't', 'u', 'p',
-    // Incomplete List of 128-bit Service UUIDs (The Config Service)
-    0x11, BLUETOOTH_DATA_TYPE_INCOMPLETE_LIST_OF_128_BIT_SERVICE_CLASS_UUIDS, 
-    0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00
 };
 
-int att_write_callback(hci_con_handle_t con_handle, uint16_t att_handle, uint16_t transaction_mode, uint16_t offset, uint8_t *buffer, uint16_t buffer_size) {
+static std::string temp_ssid = "";
+static std::string temp_pass = "";
+static btstack_timer_source_t setup_poll_timer;
+
+namespace {
+    constexpr uint8_t REPORT_MASK_VOLUME_UP     = 1 << 0;
+    constexpr uint8_t REPORT_MASK_VOLUME_DOWN   = 1 << 1;
+    constexpr uint8_t REPORT_MASK_MUTE          = 1 << 2;
+    constexpr uint8_t REPORT_MASK_PLAY_PAUSE    = 1 << 3;
+    constexpr uint8_t REPORT_MASK_NEXT_TRACK    = 1 << 4;
+    constexpr uint8_t REPORT_MASK_PREV_TRACK    = 1 << 5;
+}
+
+static void setup_poll_handler(btstack_timer_source_t *ts) {
+    cyw43_arch_poll(); 
+    btstack_run_loop_set_timer(ts, 5); 
+    btstack_run_loop_add_timer(ts);
+}
+
+static void start_setup_advertising() {
+    printf("[BLE] Stack Ready. Configuring Advertising...\n");
+    stdio_flush();
+
+    // --- FIX: Use Pico Unique ID for Stable Address ---
+    // Instead of a random address that changes on every boot (forcing re-pairing),
+    // we use the Pico's unique Flash ID to generate a consistent address.
+    bd_addr_t setup_addr;
+    pico_unique_board_id_t board_id;
+    pico_get_unique_board_id(&board_id);
+
+    // Copy the last 6 bytes of the board ID (8 bytes total) to the setup address
+    memcpy(setup_addr, &board_id.id[2], 6);
     
-    // Debug Print
-    printf("ATT Write: Handle=0x%04X, Len=%d, Mode=%d\n", att_handle, buffer_size, transaction_mode);
+    // Force the top two bits to be 11 (Static Random Address requirement)
+    setup_addr[0] |= 0xC0; 
+    
+    gap_random_address_set(setup_addr);
 
-    if (att_handle == ATT_CHARACTERISTIC_0000FF01_0000_1000_8000_00805F9B34FB_01_VALUE_HANDLE) {
+    bd_addr_t null_addr = {0};
+    gap_advertisements_set_params(0x0030, 0x0030, 0, 1, null_addr, 0x07, 0x00);
+    gap_advertisements_set_data(sizeof(setup_adv_data), (uint8_t*)setup_adv_data);
+    gap_advertisements_enable(1);
+    
+    printf("[BLE] Advertising as 'Pico Setup' (Addr: %02X:%02X:%02X:%02X:%02X:%02X)\n",
+        setup_addr[0], setup_addr[1], setup_addr[2], setup_addr[3], setup_addr[4], setup_addr[5]);
+    stdio_flush();
+}
+
+int att_write_callback(hci_con_handle_t con_handle, uint16_t att_handle, uint16_t transaction_mode, uint16_t offset, uint8_t *buffer, uint16_t buffer_size) {
+    UNUSED(con_handle);
+    UNUSED(transaction_mode);
+    UNUSED(offset);
+
+    if (att_handle == 0 || buffer == nullptr || buffer_size == 0) return 0;
+
+    printf("[BLE] Write: Handle=0x%04X, Len=%d\n", att_handle, buffer_size);
+    stdio_flush();
+
+    if (att_handle == active_wifi_handle) {
         std::string payload((char*)buffer, buffer_size);
-        printf("Payload received: %s\n", payload.c_str()); // Print the received string
 
-        size_t separator = payload.find(':');
-        
-        if (separator != std::string::npos) {
-            std::string ssid = payload.substr(0, separator);
-            std::string pass = payload.substr(separator + 1);
-            
-            WifiConfig::save(ssid.c_str(), pass.c_str());
-            
-            printf("Rebooting in 2 seconds...\n");
-            stdio_flush();
-            
-            // --- IMPORTANT: Wait for print buffer to flush and flash to settle ---
-            sleep_ms(2000); 
-            watchdog_reboot(0, 0, 0);
-        } else {
-            printf("Error: Invalid payload format (Missing ':')\n");
+        if (payload.rfind("S:", 0) == 0) { 
+            temp_ssid = payload.substr(2);
+            printf("[BLE] Buffered SSID: %s\n", temp_ssid.c_str());
+        } 
+        else if (payload.rfind("P:", 0) == 0) { 
+            temp_pass = payload.substr(2);
+            printf("[BLE] Buffered PASS: [Hidden]\n");
+        } 
+        else if (payload == "SAVE") {
+            if (!temp_ssid.empty()) {
+                printf("[BLE] Saving config and rebooting to NORMAL mode...\n");
+                WifiConfig::save(temp_ssid.c_str(), temp_pass.c_str());
+                BOOT_FLAG_REGISTER = 0;
+                stdio_flush(); 
+                sleep_ms(100); 
+                watchdog_enable(1, 0); 
+                while(1);
+            } else {
+                printf("[BLE] Error: Cannot save empty SSID\n");
+            }
         }
         return 0; 
     }
     return 0;
 }
 
+uint16_t att_read_callback(hci_con_handle_t connection_handle, uint16_t att_handle, uint16_t offset, uint8_t * buffer, uint16_t buffer_size){
+    UNUSED(connection_handle);
+    UNUSED(att_handle);
+    UNUSED(offset);
+    UNUSED(buffer);
+    UNUSED(buffer_size);
+    return 0;
+}
+
 void MediaControllerDevice::setup() {
     HidDevice::setup();
 
-    printf("Registering ATT Write Callback...\n");
+    bool is_setup_mode = (BOOT_FLAG_REGISTER == SETUP_MODE_MAGIC);
 
-    att_server_init(profile_data, nullptr, att_write_callback);
-    hids_device_init(0, getHidDescriptor(), getHidDescriptorSize());
-    battery_service_server_init(100);
-    device_information_service_server_init();
-    device_information_service_server_set_manufacturer_name("Pico Projects");
-    device_information_service_server_set_model_number("PIO Encoder v1.0");
+    if (is_setup_mode) {
+        printf("\n!!! BOOTING IN SETUP MODE (Profile: setup_mode.gatt) !!!\n");
+        m_setup_mode = true;
+        BOOT_FLAG_REGISTER = 0;
 
-    bd_addr_t null_addr = {0};
-    gap_advertisements_set_params(0x0030, 0x0030, 0, 0, null_addr, 0x07, 0x00);
-    gap_advertisements_set_data(getAdvertisingDataSize(), (uint8_t*)getAdvertisingData());
-    gap_advertisements_enable(1);
+        // Security: BONDING ENABLED
+        sm_set_io_capabilities(IO_CAPABILITY_NO_INPUT_NO_OUTPUT);
+        sm_set_authentication_requirements(SM_AUTHREQ_SECURE_CONNECTION | SM_AUTHREQ_BONDING); 
+
+        att_server_init(get_setup_profile_data(), att_read_callback, att_write_callback);
+        active_wifi_handle = get_setup_wifi_handle();
+        printf("[BLE] Wi-Fi Config Handle: 0x%04X\n", active_wifi_handle);
+
+        battery_service_server_init(100);
+        device_information_service_server_init();
+
+        printf("[BLE] Configured for Setup. Returning to App to draw UI...\n");
+        stdio_flush();
+        
+        setup_poll_timer.process = &setup_poll_handler;
+        btstack_run_loop_set_timer(&setup_poll_timer, 5);
+        btstack_run_loop_add_timer(&setup_poll_timer);
+
+    } else {
+        printf("\n--- Booting in Normal Media Mode (Profile: media_controller.gatt) ---\n");
+        m_setup_mode = false;
+
+        sm_set_io_capabilities(IO_CAPABILITY_NO_INPUT_NO_OUTPUT);
+        sm_set_authentication_requirements(SM_AUTHREQ_SECURE_CONNECTION | SM_AUTHREQ_BONDING);
+
+        att_server_init(profile_data, nullptr, nullptr); 
+        active_wifi_handle = 0; 
+        
+        hids_device_init(0, getHidDescriptor(), getHidDescriptorSize());
+        battery_service_server_init(100);
+        device_information_service_server_init();
+        
+        bd_addr_t null_addr = {0};
+        gap_advertisements_set_params(0x0030, 0x0030, 0, 0, null_addr, 0x07, 0x00);
+        gap_advertisements_set_data(getAdvertisingDataSize(), (uint8_t*)getAdvertisingData());
+        gap_advertisements_enable(1);
+    }
+}
+
+void MediaControllerDevice::handlePacket(uint8_t packet_type, uint16_t channel, uint8_t* packet, uint16_t size) {
+    HidDevice::handlePacket(packet_type, channel, packet, size);
+
+    if (packet_type == HCI_EVENT_PACKET) {
+        uint8_t event = hci_event_packet_get_type(packet);
+
+        if (event == BTSTACK_EVENT_STATE) {
+            if (btstack_event_state_get_state(packet) == HCI_STATE_WORKING) {
+                if (m_setup_mode) start_setup_advertising();
+            }
+        }
+        else if (event == HCI_EVENT_LE_META) {
+            if (hci_event_le_meta_get_subevent_code(packet) == HCI_SUBEVENT_LE_CONNECTION_COMPLETE) {
+                 uint16_t conn_handle = hci_subevent_le_connection_complete_get_connection_handle(packet);
+                 printf("[BLE] LE Connection Complete. Handle: 0x%04X\n", conn_handle);
+                 
+                 // --- FIX: PROACTIVELY REQUEST SECURITY ---
+                 // Don't wait for Windows to hit the characteristic and fail. 
+                 // Force the pairing process to start immediately upon connection.
+                 if (m_setup_mode) {
+                     printf("[BLE] Requesting Security (Pairing)...\n");
+                     sm_send_security_request(conn_handle);
+                 }
+                 stdio_flush();
+            }
+        }
+        else if (event == HCI_EVENT_DISCONNECTION_COMPLETE) {
+             printf("[BLE] Disconnected.\n");
+             if (m_setup_mode) gap_advertisements_enable(1);
+        }
+        else if (event == SM_EVENT_JUST_WORKS_REQUEST) {
+            printf("[BLE] Just Works Requested -> Confirming.\n");
+            sm_just_works_confirm(sm_event_just_works_request_get_handle(packet));
+        }
+        else if (event == SM_EVENT_PAIRING_COMPLETE) {
+            printf("[BLE] Pairing Complete. Status: 0x%02X\n", sm_event_pairing_complete_get_status(packet));
+        }
+    }
+}
+
+void MediaControllerDevice::enterSetupMode() {
+    printf("[BLE] Requesting Setup Mode -> Rebooting...\n");
+    BOOT_FLAG_REGISTER = SETUP_MODE_MAGIC;
+    watchdog_enable(1, 0); 
+    while(true);
 }
 
 void MediaControllerDevice::setBatteryLevel(uint8_t level) {
@@ -98,46 +239,3 @@ void MediaControllerDevice::playPause() { uint8_t report[] = {REPORT_MASK_PLAY_P
 void MediaControllerDevice::nextTrack() { uint8_t report[] = {REPORT_MASK_NEXT_TRACK}; sendHidReport(report, sizeof(report)); }
 void MediaControllerDevice::previousTrack() { uint8_t report[] = {REPORT_MASK_PREV_TRACK}; sendHidReport(report, sizeof(report)); }
 void MediaControllerDevice::release() { uint8_t report[] = {0x00}; sendHidReport(report, sizeof(report)); }
-
-void MediaControllerDevice::enterSetupMode() {
-    printf("Entering Setup Mode (HID Disabled)\n");
-    m_setup_mode = true;
-    
-    // 1. Kill existing connection (Kill the Zombie)
-    disconnect();
-    
-    // 2. Stop Advertising
-    gap_advertisements_enable(0);
-    sleep_ms(50); // Give the stack a moment
-    
-    // 3. --- NEW: Change Identity to Random Address ---
-    // This fools Windows into thinking we are a stranger.
-    bd_addr_t random_addr;
-    // We'll generate a static random address: 0xC0 (top bits 11) ensures it's "Random Static"
-    // We can just use a fixed one for setup mode: C0:FF:EE:C0:FF:EE
-    bd_addr_t setup_addr = {0xC0, 0xFF, 0xEE, 0xC0, 0xFF, 0xEE};
-    
-    // Configure stack to use this random address
-    gap_random_address_set(setup_addr);
-    
-    // Tell advertising to USE the random address (0x01 = Random Address Type)
-    // Params: min, max, adv_type, direct_addr_type, direct_addr, channel_map, filter_policy
-    // Note: BTstack usually sets the own_addr_type via gap_advertisements_set_params logic
-    // but we might need to rely on the default behavior picking up the set random address 
-    // if we don't explicitly control the "own_address_type" parameter (which is hidden in some API wrappers).
-    // However, on Pico SDK's BTstack, simply setting the random address is often enough if the Advertising parameters are refreshed.
-    
-    // Let's force update parameters. 
-    // We keep default intervals (0x0030) but we need to ensure the stack knows we swapped addresses.
-    // NOTE: The Pico-SDK version of gap_advertisements_set_params DOES NOT take "own_address_type".
-    // It is inferred. We must hope gap_random_address_set takes precedence when configured.
-    // ---------------------------------------------------
-
-    // 4. Set the new name "Pico Setup"
-    gap_advertisements_set_data(sizeof(setup_adv_data), (uint8_t*)setup_adv_data);
-    
-    // 5. Restart Advertising
-    gap_advertisements_enable(1);
-    
-    printf("Now advertising as 'Pico Setup' (Address Spoofed).\n");
-}

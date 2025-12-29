@@ -3,7 +3,6 @@ cmake_minimum_required(VERSION 3.13)
 # Find Python3 Interpreter
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-# == DO NOT EDIT THE FOLLOWING LINES for the Raspberry Pi Pico VS Code Extension to work ==
 if(WIN32)
     set(USERHOME $ENV{USERPROFILE})
 else()
@@ -16,7 +15,7 @@ set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
 if (EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
-# ====================================================================================
+
 set(PICO_BOARD pico_w CACHE STRING "Board type")
 
 include(src/pico/pico_sdk_import.cmake)
@@ -27,15 +26,11 @@ project(pico_hid_devices C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
-# --- Initialize the Pico SDK ---
 pico_sdk_init()
 
-# --- Common sources and libraries ---
 set(COMMON_SOURCES
     src/hid/HidDevice.cpp
     src/bt/BtStackManager.cpp
-    # src/pico/picow_bt_example_common.cpp
-    # src/pico/picow_bt_example_background.cpp
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/battery_service_server.c
     ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/device_information_service_server.c
 )
@@ -46,7 +41,7 @@ set(COMMON_LIBS
     hardware_adc
 )
 
-# --- 1. Define the Keyboard Application (unchanged) ---
+# --- 1. Keyboard App ---
 set(KEYBOARD_TARGET_NAME keyboard_app)
 add_executable(${KEYBOARD_TARGET_NAME}
     src/keyboard/keyboard_main.cpp
@@ -72,8 +67,15 @@ target_compile_definitions(${KEYBOARD_TARGET_NAME} PRIVATE PICO_STDIO_USB_CONNEC
 pico_enable_stdio_uart(${KEYBOARD_TARGET_NAME} 1)
 pico_add_extra_outputs(${KEYBOARD_TARGET_NAME})
 
-# --- 2. Define the Media Controller Application ---
+# --- 2. Media App ---
 set(MEDIA_TARGET_NAME media_app)
+
+# A. Create a library for the Setup Profile
+# This compiles SetupProfile.c and generates setup_mode.h
+add_library(setup_profile_lib src/media/SetupProfile.c)
+pico_btstack_make_gatt_header(setup_profile_lib PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/media/setup_mode.gatt)
+
+# B. Main Media Executable
 add_executable(${MEDIA_TARGET_NAME}
     src/media/media_main.cpp
     src/media/MediaApplication.cpp
@@ -86,20 +88,21 @@ add_executable(${MEDIA_TARGET_NAME}
     ${COMMON_SOURCES}
 )
 
-# --- Link all necessary libraries for Wi-Fi + BLE ---
+# Link the Setup Profile library
 target_link_libraries(${MEDIA_TARGET_NAME} PRIVATE 
     ${COMMON_LIBS}
     hardware_pio
-    pico_cyw43_arch_lwip_threadsafe_background 
+    pico_cyw43_arch_lwip_threadsafe_background
+    setup_profile_lib
 )
 
-# --- Generate headers ---
 pico_generate_pio_header(${MEDIA_TARGET_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/display/st7789_lcd.pio)
+
+# Generate the Normal Profile header (attached directly to executable)
 pico_btstack_make_gatt_header(${MEDIA_TARGET_NAME} PRIVATE 
     ${CMAKE_CURRENT_SOURCE_DIR}/src/media/media_controller.gatt
 )
 
-# --- Configure Media App ---
 target_include_directories(${MEDIA_TARGET_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/config
