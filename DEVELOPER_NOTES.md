@@ -19,9 +19,8 @@ The heart of the system is the single, non-blocking `while(true)` loop in `media
 The Pico W SDK requires a specific initialization order to prevent driver conflicts, especially between the wireless chip (CYW43) and other hardware peripherals. The `main()` and `MediaApplication::setup()` methods enforce this sequence:
 1.  **Core Hardware:** `stdio`, `RotaryEncoder`, `Display`.
 2.  **Wireless Driver Stack:** `cyw43_arch_init()`. This must happen before any software services that depend on it.
-3.  **Bluetooth Stack:** BTstack and other application services are initialized.
-4.  **Wi-Fi Connection:** The Wi-Fi connection and TCP server are started.
-5.  **Enter Main Loop:** The `btstack_run_loop_execute()` scheduler is entered.
+3.  **Bluetooth Stack:** BTstack is initialized.
+4.  **Application Logic:** Check `BOOT_FLAG_REGISTER` to decide between Setup Mode or Normal Mode.
 
 ### 1.3. High-Priority Interrupt Handling for Rotary Encoder
 A major challenge was the conflict between the `RotaryEncoder`'s GPIO interrupts and the CYW43 wireless driver's internal interrupt handler. Both compete for the same hardware IRQ (`IO_IRQ_BANK0`).
@@ -51,7 +50,7 @@ The Python host application is designed for clarity, efficiency, and robustness.
     -   `display_manager.py`: The main orchestrator.
 -   **Efficient "Diff & Tile" Algorithm:** This is central to the project's performance. Instead of sending a full 150KB framebuffer every second, it sends only a few kilobytes when the time changes by:
     1.  Comparing the new UI with the last frame sent.
-    2.  Calculating the smallest rectangular "bounding box" of changed pixels.
+    2.  Calculate the smallest rectangular "bounding box" of changed pixels.
     3.  Breaking this "diff" into smaller "tiles" to fit within the protocol's payload size.
 -   **Reliable TCP Communication:** The protocol uses `ACK`-based flow control. The host sends one tile and blocks, waiting for an `ACK` from the Pico before proceeding. This completely solves the buffer overflow problem by slaving the transfer speed to the Pico's drawing speed.
 
@@ -62,30 +61,47 @@ The Python host application is designed for clarity, efficiency, and robustness.
 This project overcame several complex integration challenges. The solutions are now embedded in the architecture.
 
 1.  **Startup Deadlocks & GPIO Interrupt Conflicts**
-    *   **Problem:** The application would hang on startup. This was caused by `cyw43_arch_init()` and `RotaryEncoder::init()` competing to register a raw GPIO interrupt handler for the same hardware IRQ.
-    *   **Solution:** The `RotaryEncoder` now registers its raw IRQ handler with an explicit, higher priority (`0x30`) than the CYW43 driver's default (`0x40`), allowing them to coexist.
+    * **Problem:** The application would hang on startup. This was caused by `cyw43_arch_init()` and `RotaryEncoder::init()` competing to register a raw GPIO interrupt handler for the same hardware IRQ.
+    * **Solution:** The `RotaryEncoder` now registers its raw IRQ handler with an explicit, higher priority (`0x30`) than the CYW43 driver's default (`0x40`), allowing them to coexist.
 
 2.  **Kernel Panic: `Attempted to sleep inside of an exception handler`**
-    *   **Problem:** An early architecture tried to run application logic inside a `btstack` timer callback. The `Display` driver uses `sleep_us()`, a blocking call forbidden in an interrupt context (where timers execute).
-    *   **Solution:** The architecture was reverted to the canonical Pico SDK model: a single `while(true)` loop that drives a cooperative scheduler. All application logic now runs in a safe, non-interrupt context.
+    * **Problem:** An early architecture tried to run application logic inside a `btstack` timer callback. The `Display` driver uses `sleep_us()`, a blocking call forbidden in an interrupt context (where timers execute).
+    * **Solution:** The architecture was reverted to the canonical Pico SDK model: a single `while(true)` loop that drives a cooperative scheduler. All application logic now runs in a safe, non-interrupt context.
 
 3.  **Network Instability & Buffer Overflows**
-    *   **Problem:** The Python host sent TCP data faster than the Pico could process it, causing lwIP's internal buffers to overflow, leading to corrupted data and dropped connections.
-    *   **Solution:** The multi-stage, robust flow control system described in sections 1.4 and 2 was implemented (Producer-Consumer queue + ACK-based protocol).
+    * **Problem:** The Python host sent TCP data faster than the Pico could process it, causing lwIP's internal buffers to overflow, leading to corrupted data and dropped connections.
+    * **Solution:** The multi-stage, robust flow control system described in sections 1.4 and 2 was implemented (Producer-Consumer queue + ACK-based protocol).
 
 4.  **Bluetooth Crashes Under Heavy Use**
-    *   **Problem:** Rapidly turning the rotary encoder caused a BTstack assertion failure (`btstack_run_loop_base_add_timer`) because the code was trying to add a timer that was already scheduled.
-    *   **Solution:** The event handling logic in `handle_encoder()` now explicitly removes the timer (`btstack_run_loop_remove_timer`) before setting its new timeout and adding it back. This is the correct pattern for re-triggering an existing BTstack timer.
-
-5.  **Memory Leaks (`pbuf_free`)**
-    *   **Problem:** A subtle memory leak was discovered in the TCP server where empty or malformed packets were not being correctly freed, eventually exhausting the lwIP memory pool and causing a crash after long run times.
-    *   **Solution:** The `_recv_callback` logic was refactored to ensure `pbuf_free(p)` is called on all code paths, and the stream processing logic robustly handles buffer boundaries.
+    * **Problem:** Rapidly turning the rotary encoder caused a BTstack assertion failure (`btstack_run_loop_base_add_timer`) because the code was trying to add a timer that was already scheduled.
+    * **Solution:** The event handling logic in `handle_encoder()` now explicitly removes the timer (`btstack_run_loop_remove_timer`) before setting its new timeout and adding it back. This is the correct pattern for re-triggering an existing BTstack timer.
 
 ---
 
 ## 4. Limitations and Design Trade-offs
 
-*   **Cooperative, Not Preemptive:** The firmware runs in a cooperative, single-threaded environment. Any task that blocks for a long time without yielding (e.g., a long calculation or a driver without `cyw43_arch_poll()`) will starve all other tasks, including Bluetooth and Wi-Fi.
-*   **Throughput is Limited by Drawing Speed:** The ACK-based flow control makes the network transfer extremely reliable, but the overall data throughput is bottlenecked by the slowest part of the consumer chain: drawing pixels to the LCD.
-*   **Memory Usage:** The tile queue (`m_tile_queue`) and the asynchronous drawing buffer in the `Drawing` class consume RAM. Handling larger images would require careful memory management.
-*   **Interrupt Priority:** The manual management of IRQ priorities is powerful but fragile. Adding other low-level hardware drivers would require careful consideration of the interrupt priority chain to avoid future conflicts.
+* **Cooperative, Not Preemptive:** The firmware runs in a cooperative, single-threaded environment. Any task that blocks for a long time without yielding (e.g., a long calculation or a driver without `cyw43_arch_poll()`) will starve all other tasks, including Bluetooth and Wi-Fi.
+* **Throughput is Limited by Drawing Speed:** The ACK-based flow control makes the network transfer extremely reliable, but the overall data throughput is bottlenecked by the slowest part of the consumer chain: drawing pixels to the LCD.
+* **Memory Usage:** The tile queue (`m_tile_queue`) and the asynchronous drawing buffer in the `Drawing` class consume RAM. Handling larger images would require careful memory management.
+
+---
+
+## 5. Provisioning & Flash Architecture (New)
+
+The system now supports a "Provisioning Mode" (Setup Mode) to configure Wi-Fi credentials without recompiling.
+
+### 5.1. Dual-Boot Mechanism
+To switch between "Normal Media Mode" (HID) and "Setup Mode" (Wi-Fi Config), we utilize the **Watchdog Scratch Register 7**.
+1.  **Enter Setup:** When the user long-presses the encoder button (3s), the firmware writes a magic value (`0x7E57CAFE`) to `watchdog_hw->scratch[7]` and triggers a soft reset via `watchdog_enable(1, 0)`.
+2.  **Boot Check:** On startup, `MediaControllerDevice::setup()` reads this register.
+    * If **Magic Match**: It initializes the Setup Profile (`setup_mode.gatt`) and clears the register.
+    * If **No Match**: It initializes the Normal Profile (`media_controller.gatt`).
+
+### 5.2. Profile Switching
+BTstack does not easily support dynamic service changing at runtime. The reboot approach allows us to cleanly initialize `att_server` with a completely different GATT database pointer:
+* **Setup Mode:** Uses `setup_mode.gatt`. Advertises as "Pico Setup". Contains a custom Write-only characteristic for receiving "SSID:Password" strings.
+* **Normal Mode:** Uses `media_controller.gatt`. Advertises as "Pico MediaCtl". Contains HID Service and Battery Service.
+
+### 5.3. Flash Persistence
+* **Location:** Credentials are stored in the **second-to-last sector** of the 2MB Flash (`PICO_FLASH_SIZE_BYTES - (4 * FLASH_SECTOR_SIZE)`). This avoids conflict with the Program Binary (start of flash) and the BTstack NVM (end of flash).
+* **Safety:** The `WifiConfig` class disables interrupts on the core before performing the erase/program sequence to prevent XIP (Execute In Place) crashes during flash writes.

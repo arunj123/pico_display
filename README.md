@@ -6,36 +6,38 @@ This project transforms a Raspberry Pi Pico W into a versatile, multi-function d
 
 ### 1. Media Controller & Weather Display (`media_app`)
 The flagship firmware target. It operates as a hybrid IoT device:
-*   **BLE Media HID:**
-    *   **Rotary Encoder:** Controls host volume (Clockwise/Counter-Clockwise).
-    *   **Push Button:** Toggles Mute.
-    *   **Battery Service:** Simulates battery level for BLE testing.
-*   **Smart TCP Display:**
-    *   Connects to Wi-Fi and listens on a TCP port.
-    *   Receives optimized "image tiles" from a host Python script.
-    *   Renders a high-speed, tear-free UI on an ST7789 IPS LCD.
-    *   **Zero-Blocking:** Uses a custom "Diff & Tile" protocol with ACK flow control to prevent network buffer overflows.
+* **BLE Media HID:**
+    * **Rotary Encoder:** Controls host volume (Clockwise/Counter-Clockwise).
+    * **Push Button:** Toggles Mute.
+    * **Long Press (3s):** Reboots device into **Setup Mode**.
+    * **Battery Service:** Simulates battery level for BLE testing.
+* **Smart TCP Display:**
+    * Connects to Wi-Fi and listens on a TCP port.
+    * Receives optimized "image tiles" from a host Python script.
+    * Renders a high-speed, tear-free UI on an ST7789 IPS LCD.
+    * **Zero-Blocking:** Uses a custom "Diff & Tile" protocol with ACK flow control to prevent network buffer overflows.
 
-### 2. Host Weather Application (`scripts/display_manager.py`)
+### 2. Web-Based Provisioning (Setup Mode)
+No need to recompile to change Wi-Fi networks!
+* **QR Code Pairing:** Generates a QR code on the LCD pointing to a hosted Web App.
+* **Web Bluetooth:** Uses the browser's Bluetooth API to connect securely to the Pico.
+* **Flash Persistence:** Saves SSID and Password to the Pico's onboard Flash memory.
+
+### 3. Host Weather Application (`scripts/display_manager.py`)
 A Python application running on your PC/Mac/Raspberry Pi:
-*   **Live Data:** Fetches real-time weather from the Open-Meteo API.
-*   **Dynamic UI:** Generates a beautiful gradient background that changes based on the time of day (Morning/Day/Sunset/Night).
-*   **Efficient Transport:** Only sends changed pixels (diffs) to the Pico W to minimize latency.
-
-### 3. BLE Keyboard (`keyboard_app`)
-A standalone firmware example:
-*   Turns the Pico W into a standard Bluetooth Keyboard.
-*   Supports typing via Serial input (stdin) or an automatic demo mode.
+* **Live Data:** Fetches real-time weather from the Open-Meteo API.
+* **Dynamic UI:** Generates a beautiful gradient background that changes based on the time of day (Morning/Day/Sunset/Night).
+* **Efficient Transport:** Only sends changed pixels (diffs) to the Pico W to minimize latency.
 
 ---
 
 ## Hardware Wiring
 
 ### Components
-*   Raspberry Pi Pico W
-*   ST7789 Display (240x320 SPI)
-*   EC11 Rotary Encoder (with Push Button)
-*   (Optional) Raspberry Pi Debug Probe for SWD debugging
+* Raspberry Pi Pico W
+* ST7789 Display (240x320 SPI)
+* EC11 Rotary Encoder (with Push Button)
+* (Optional) Raspberry Pi Debug Probe for SWD debugging
 
 ### Pin Connections
 
@@ -60,19 +62,19 @@ A standalone firmware example:
 
 ---
 
-## Project Configuration
+## Setup & Configuration
 
-### 1. Wi-Fi Credentials (Firmware)
-Before building, you **must** configure your network settings.
-1.  Open `config/private_config.h`.
-2.  Edit the constants:
-    ```cpp
-    constexpr const char* const WIFI_SSID = "Your_WiFi_Name";
-    constexpr const char* const WIFI_PASSWORD = "Your_WiFi_Password";
-    ```
+### 1. Wi-Fi Configuration (Provisioning)
+You do **not** need to edit header files to set up Wi-Fi.
+1.  Flash the `media_app` firmware.
+2.  On boot, if no credentials are found, or if you **Long Press (3s)** the encoder button, the device enters **Setup Mode**.
+3.  The LCD will display a QR Code.
+4.  Scan the QR Code (or visit the URL) on a device with Bluetooth (Phone/Laptop).
+5.  Follow the web prompts to connect to "Pico Setup" and send your Wi-Fi credentials.
+6.  The device will automatically save and reboot into Normal Mode.
 
 ### 2. Host Settings (Python)
-After flashing the Pico and getting its IP address (via Serial Monitor):
+After the Pico connects to Wi-Fi, it will display its IP address.
 1.  Open `scripts/config.py`.
 2.  Update the target IP:
     ```python
@@ -115,47 +117,23 @@ If OpenOCD fails with `unable to find a matching CMSIS-DAP device` or `could not
 
 ---
 
-## Running the System
-
-1.  **Start the Pico:**
-    *   Reset the Pico.
-    *   Open a Serial Monitor (115200 baud).
-    *   Wait for the log: `Connected to Wi-Fi. IP: 192.168.X.X`.
-    *   The LCD will display: "Waiting for host...".
-
-2.  **Start the Python Host:**
-    *   Navigate to the scripts folder: `cd scripts`
-    *   Run the manager: `python display_manager.py`
-    *   The script will generate the UI and push it to the Pico.
-
-3.  **Connect Bluetooth:**
-    *   Scan for Bluetooth devices on your phone/PC.
-    *   Connect to **"Pico MediaCtl"**.
-    *   Turn the encoder to change volume!
-
----
-
 ## Architecture Design
 
 ### Firmware (C++)
-*   **Producer-Consumer Pattern:**
-    *   **Producer (ISR):** The TCP receive callback runs in an interrupt context. It validates the CRC of incoming "Tiles" and pushes them into a thread-safe `m_tile_queue`.
-    *   **Consumer (Main Loop):** The main loop pulls tiles from the queue and draws them. It only sends an **ACK** to the host when it is ready for more data.
-*   **Cooperative Multitasking:**
-    *   The system uses a single `while(true)` loop.
-    *   Blocking operations (like drawing 76,800 pixels) explicitly yield via `cyw43_arch_poll()` every 64 pixels to keep the Wi-Fi and Bluetooth stacks alive.
-*   **Interrupt Priority Management:**
-    *   The Rotary Encoder uses a **Raw IRQ Handler** with a higher priority (`0x30`) than the Wi-Fi chip (`0x40`) to ensure volume inputs are never missed, even during heavy network traffic.
+* **Dual-Profile Bluetooth:**
+    * **Normal Mode:** Exposes HID Service (Keyboard/Consumer Control).
+    * **Setup Mode:** Exposes a custom GATT Service for Wi-Fi provisioning.
+    * Switching relies on a "Magic Byte" in the Watchdog Scratch register to persist state across soft reboots.
+* **Producer-Consumer Pattern:**
+    * **Producer (ISR):** The TCP receive callback runs in an interrupt context. It validates the CRC of incoming "Tiles" and pushes them into a thread-safe `m_tile_queue`.
+    * **Consumer (Main Loop):** The main loop pulls tiles from the queue and draws them. It only sends an **ACK** to the host when it is ready for more data.
+* **Cooperative Multitasking:**
+    * The system uses a single `while(true)` loop.
+    * Blocking operations (like drawing 76,800 pixels) explicitly yield via `cyw43_arch_poll()` every 64 pixels to keep the Wi-Fi and Bluetooth stacks alive.
 
 ### Host (Python)
-*   **Diff & Tile Algorithm:**
-    *   The script keeps a copy of the previous frame.
-    *   It calculates the bounding box of changed pixels (the "Diff").
-    *   It slices this area into 8KB "Tiles" (payloads).
-    *   It waits for an application-level `ACK` from the Pico before sending the next tile, ensuring 100% reliability.
-
-## Troubleshooting
-
-*   **"Entity not found" (OpenOCD):** This means the wrong driver is applied to the Debug Probe. Use Zadig to force **WinUSB** on **Interface 0**.
-*   **Connection Refused (Python):** Check that the `PICO_IP` in `config.py` matches the actual IP printed in the Serial Monitor.
-*   **Bluetooth Disconnects:** Ensure your power supply is stable. Wi-Fi transmission spikes can cause brownouts on weak USB ports.
+* **Diff & Tile Algorithm:**
+    * The script keeps a copy of the previous frame.
+    * It calculates the bounding box of changed pixels (the "Diff").
+    * It slices this area into 8KB "Tiles" (payloads).
+    * It waits for an application-level `ACK` from the Pico before sending the next tile, ensuring 100% reliability.
