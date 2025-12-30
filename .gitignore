@@ -1,3 +1,5 @@
 build
+output
+buildroot
 __pycache__/
 current_display.png

@@ -1,35 +1,31 @@
 #!/bin/bash
 set -e
 
-# Configuration
-# We place buildroot one level up or in a 'deps' folder to keep repo clean
-BUILDROOT_DIR="../buildroot"
-# output directory for the build artifacts
-OUTPUT_DIR="../build_pi_output"
-# Path to your custom directory (relative to this script)
-EXTERNAL_TREE=$(readlink -f "./pi_gateway")
+# --- FIX FOR WSL2: Remove Windows paths with spaces ---
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# ------------------------------------------------------
 
-# 1. Download Buildroot if missing
+# Config
+REPO_ROOT=$(pwd)
+BUILDROOT_DIR="${REPO_ROOT}/buildroot"
+EXTERNAL_TREE="${REPO_ROOT}/pi_gateway"
+OUTPUT_DIR="${REPO_ROOT}/output"
+BR_BRANCH="2025.11.x"  # The branch you requested
+
+# 1. Clone Buildroot if missing
 if [ ! -d "$BUILDROOT_DIR" ]; then
-    echo "Buildroot not found. Cloning..."
-    git clone https://git.buildroot.net/buildroot $BUILDROOT_DIR
-    # Checkout a stable branch for consistency (Optional but recommended)
-    cd $BUILDROOT_DIR && git checkout 2024.02.x && cd -
+    echo "Cloning Buildroot (${BR_BRANCH})..."
+    git clone -b $BR_BRANCH https://git.buildroot.net/buildroot $BUILDROOT_DIR
 fi
 
-# 2. Configure (only if .config doesn't exist)
+# 2. Configure (if no .config exists)
 if [ ! -f "$OUTPUT_DIR/.config" ]; then
-    echo "Configuring Buildroot..."
-    make -C $BUILDROOT_DIR \
-         BR2_EXTERNAL="$EXTERNAL_TREE" \
-         O="$OUTPUT_DIR" \
-         pizero_defconfig
-else
-    echo "Buildroot already configured. Skipping defconfig..."
+    echo "Configuring..."
+    make -C $BUILDROOT_DIR BR2_EXTERNAL="$EXTERNAL_TREE" O="$OUTPUT_DIR" pizero_defconfig
 fi
 
 # 3. Build
-echo "Building Image..."
+echo "Building..."
 make -C $OUTPUT_DIR
 
-echo "Done! Image is at: $OUTPUT_DIR/images/sdcard.img"
+echo "Done! Image: $OUTPUT_DIR/images/sdcard.img"
