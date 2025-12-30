@@ -1,0 +1,9 @@
+# <file system> <mount pt>  <type>  <options>       <dump>  <pass>
+/dev/root       /           squashfs ro,relatime     0      0
+devtmpfs        /dev        devtmpfs defaults        0      0
+tmpfs           /tmp        tmpfs    defaults        0      0
+tmpfs           /run        tmpfs    defaults        0      0
+proc            /proc       proc     defaults        0      0
+sysfs           /sys        sysfs    defaults        0      0
+# The Data Partition (Partition 3)
+/dev/mmcblk0p3  /mnt/data   vfat     defaults,ro     0      0

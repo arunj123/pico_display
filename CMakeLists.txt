@@ -99,3 +99,11 @@ target_compile_definitions(${MEDIA_TARGET_NAME} PRIVATE
 target_link_options(${MEDIA_TARGET_NAME} PRIVATE "-Wl,--defsym=__STACK_SIZE=16384")
 pico_enable_stdio_uart(${MEDIA_TARGET_NAME} 1)
 pico_add_extra_outputs(${MEDIA_TARGET_NAME})
+
+
+add_custom_target(pi_image
+    COMMAND ${CMAKE_SOURCE_DIR}/scripts/build_pi_image.sh
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Building Raspberry Pi Zero Image with Buildroot..."
+    USES_TERMINAL
+)

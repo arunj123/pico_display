@@ -1,0 +1,71 @@
+#!/bin/sh
+
+USER_SCRIPT="/usr/bin/main.py"
+WIFI_CONF="/mnt/data/wifi.conf"
+DATA_DIR="/mnt/data"
+
+start() {
+    echo "Starting IoT Service..."
+
+    # 1. Mount Data Partition
+    mkdir -p $DATA_DIR
+    mount /dev/mmcblk0p3 $DATA_DIR
+
+    # 2. Check for WiFi Config
+    if [ ! -f "$WIFI_CONF" ]; then
+        echo "No wifi.conf found on data partition!"
+        # Optional: create a dummy file so user knows format
+        mount -o remount,rw $DATA_DIR
+        echo 'network={' > $WIFI_CONF
+        echo '  ssid="YOUR_SSID"' >> $WIFI_CONF
+        echo '  psk="YOUR_PASS"' >> $WIFI_CONF
+        echo '}' >> $WIFI_CONF
+        mount -o remount,ro $DATA_DIR
+        exit 1
+    fi
+
+    # 3. Start WiFi
+    echo "Starting WiFi..."
+    wpa_supplicant -B -i wlan0 -c $WIFI_CONF
+    
+    # 4. Wait for IP (simple loop)
+    echo "Waiting for IP..."
+    TIMEOUT=0
+    while ! ifconfig wlan0 | grep "inet addr" > /dev/null; do
+        sleep 1
+        TIMEOUT=$((TIMEOUT+1))
+        if [ $TIMEOUT -gt 30 ]; then
+            echo "WiFi timed out."
+            break
+        fi
+    done
+
+    # 5. Run Python Script
+    # usage: python3 script.py & (run in background)
+    echo "Launching Python script..."
+    python3 $USER_SCRIPT &
+}
+
+stop() {
+    echo "Stopping IoT Service..."
+    killall python3
+    killall wpa_supplicant
+}
+
+case "$1" in
+  start)
+    start
+    ;;
+  stop)
+    stop
+    ;;
+  restart|reload)
+    stop
+    start
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart}"
+    exit 1
+esac
+
+exit $?
