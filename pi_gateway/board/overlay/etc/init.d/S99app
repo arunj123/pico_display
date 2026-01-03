@@ -4,48 +4,140 @@
 DATA_DIR="/mnt/data"
 WIFI_CONF="$DATA_DIR/wifi.conf"
 APP_SCRIPT="/usr/bin/main.py"
+DEFAULT_WIFI="/etc/wifi_defaults.conf"
+DHCP_SCRIPT="/usr/share/udhcpc/default.script"
+
+log() {
+    echo "$1"
+}
 
 start() {
-    echo "Starting IoT Gateway..."
+    log "--------------------------------"
+    log "IoT Boot Script Starting..."
+    
+    log "Loading WiFi Driver..."
+    modprobe brcmfmac
+    sleep 2
 
-    # 1. Create mount point and mount Data
-    mkdir -p $DATA_DIR
-    mount /dev/mmcblk0p3 $DATA_DIR
-
-    # 2. Check for WiFi config
-    if [ ! -f "$WIFI_CONF" ]; then
-        echo "No wifi.conf found. Creating template..."
-        mount -o remount,rw $DATA_DIR
-        printf "network={\n\tssid=\"YOUR_SSID\"\n\tpsk=\"YOUR_PASS\"\n}\n" > $WIFI_CONF
-        mount -o remount,ro $DATA_DIR
-        echo "Please edit wifi.conf on the DATA partition."
-        exit 1
-    fi
-
-    # 3. Start WiFi
-    echo "Connecting to WiFi..."
-    wpa_supplicant -B -i wlan0 -c $WIFI_CONF
-
-    # 4. Wait for IP address (Max 30 seconds)
+    # 1. Wait for Partition Device
+    log "Waiting for Data Partition..."
     TIMEOUT=0
-    while ! ifconfig wlan0 | grep "inet addr" > /dev/null; do
+    while [ ! -b "/dev/mmcblk0p3" ]; do
         sleep 1
         TIMEOUT=$((TIMEOUT+1))
-        if [ $TIMEOUT -gt 30 ]; then
-            echo "WiFi Connection Failed."
+        
+        # Trigger device scan
+        mdev -s
+        
+        # Check kernel partition table directly
+        if grep -q "mmcblk0p3" /proc/partitions; then
+             # Kernel sees it, but mdev hasn't created node? Force it.
+             mknod /dev/mmcblk0p3 b 179 3 2>/dev/null
+        fi
+
+        if [ $TIMEOUT -gt 60 ]; then
+            log "ERROR: Data partition /dev/mmcblk0p3 not found!"
+            log "Partitions seen by kernel:"
+            cat /proc/partitions > /dev/tty1
             break
         fi
     done
 
+    # 2. Mount Data Partition
+    if [ -b "/dev/mmcblk0p3" ]; then
+        mkdir -p $DATA_DIR
+        
+        # Check if already mounted (by fstab)
+        if mountpoint -q $DATA_DIR; then
+            log "Partition already mounted by fstab."
+        else
+            log "Mounting partition manually..."
+            mount /dev/mmcblk0p3 $DATA_DIR
+        fi
+        
+        # Check/Create Config
+        if [ ! -f "$WIFI_CONF" ]; then
+            log "Initializing WiFi config..."
+            
+            # Remount RW to write the file
+            mount -o remount,rw $DATA_DIR
+            
+            if [ -f "$DEFAULT_WIFI" ]; then
+                cp "$DEFAULT_WIFI" "$WIFI_CONF"
+            else
+                printf "country=DE\nctrl_interface=/var/run/wpa_supplicant\nupdate_config=1\n\nnetwork={\n\tssid=\"YOUR_SSID\"\n\tpsk=\"YOUR_PASS\"\n\tkey_mgmt=WPA-PSK\n}\n" > $WIFI_CONF
+            fi
+            
+            # Remount RO for safety
+            mount -o remount,ro $DATA_DIR
+        fi
+    fi
+
+    # 3. Handle WiFi
+    log "Setting up WiFi..."
+    killall wpa_supplicant 2>/dev/null
+    killall udhcpc 2>/dev/null
+    
+    ifconfig wlan0 up
+    sleep 2
+    
+    # Start RNG service to prevent WPA hangs
+    rngd -r /dev/hwrng
+
+    # Start wpa_supplicant with logging to /tmp/wpa.log
+    log "Starting wpa_supplicant..."
+    wpa_supplicant -B -i wlan0 -c $WIFI_CONF -f /tmp/wpa.log -t -d
+    
+    # Wait a moment for association
+    log "Waiting for association..."
+    sleep 5
+    
+    # Dump the log to screen for debugging (last 20 lines)
+    log "--- WPA LOG START ---"
+    tail -n 20 /tmp/wpa.log > /dev/tty1
+    log "--- WPA LOG END ---"
+
+    # Start DHCP
+    if [ -x "$DHCP_SCRIPT" ]; then
+        log "Requesting IP..."
+        udhcpc -b -i wlan0 -s $DHCP_SCRIPT
+    else
+        log "ERROR: DHCP script missing at $DHCP_SCRIPT"
+    fi
+
+    # 4. Wait for IP
+    TIMEOUT=0
+    IP_ADDR=""
+    while [ $TIMEOUT -lt 20 ]; do
+        IP_ADDR=$(ifconfig wlan0 2>/dev/null | grep "inet addr" | cut -d: -f2 | awk '{print $1}')
+        if [ -n "$IP_ADDR" ]; then
+            break
+        fi
+        sleep 1
+        TIMEOUT=$((TIMEOUT+1))
+    done
+
+    log ""
+    log "=========================================="
+    if [ -n "$IP_ADDR" ]; then
+        log "   IP ADDRESS:  $IP_ADDR"
+    else
+        log "   FAILURE: No IP. Check WiFi creds."
+    fi
+    log "=========================================="
+    log ""
+log "Checking Kernel Log for WiFi errors..."
+dmesg | grep -i "brcm" > /dev/tty1
+dmesg | grep -i "firmware" > /dev/tty1
     # 5. Run Python Application
-    echo "Starting Python Application..."
-    # We run it in background so boot finishes
+    log "Starting Python App..."
     python3 $APP_SCRIPT &
 }
 
 stop() {
     killall python3
     killall wpa_supplicant
+    killall udhcpc
     umount $DATA_DIR
 }
 

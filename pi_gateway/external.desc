@@ -1,2 +1,2 @@
-name: MY_IOT_GATEWAY
-desc: Custom Pi Zero W Image for IoT
+name: IOT_GATEWAY
+desc: Minimal Read-Only IoT Image

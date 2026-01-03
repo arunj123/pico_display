@@ -21,7 +21,7 @@ fi
 # 2. Configure (if no .config exists)
 if [ ! -f "$OUTPUT_DIR/.config" ]; then
     echo "Configuring..."
-    make -C $BUILDROOT_DIR BR2_EXTERNAL="$EXTERNAL_TREE" O="$OUTPUT_DIR" pizero_defconfig
+    make -C $BUILDROOT_DIR BR2_EXTERNAL="$EXTERNAL_TREE" O="$OUTPUT_DIR" raspberrypizero2w_64_defconfig
 fi
 
 # 3. Build
