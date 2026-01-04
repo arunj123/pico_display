@@ -131,6 +131,13 @@ start() {
     log "=========================================="
     if [ -n "$IP_ADDR" ]; then
         log "   IP ADDRESS:  $IP_ADDR"
+
+        log "   Syncing time with pool.ntp.org..."
+        # ntpd options:
+        # -q : Quit after clock is set (one-shot mode)
+        # -n : Run in foreground (so we wait for it to finish)
+        # -p : Peer server
+        ntpd -q -n -p pool.ntp.org        
     else
         log "   FAILURE: No IP. Check WiFi creds."
     fi
