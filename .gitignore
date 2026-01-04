@@ -3,3 +3,4 @@ output
 buildroot
 __pycache__/
 current_display.png
+pi_gateway/board/overlay/etc/wifi_defaults.conf
