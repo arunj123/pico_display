@@ -16,7 +16,7 @@ log_msg() {
 start_gadget() {
     log_msg "--- Starting USB Gadget Setup ---"
 
-    # 1. Check Hardware Driver (The #1 Failure Point)
+    # 1. Check Hardware Driver (UDC)
     UDC_NAME=$(ls /sys/class/udc 2>/dev/null | head -n 1)
     if [ -z "$UDC_NAME" ]; then
         log_msg "CRITICAL ERROR: No UDC device found in /sys/class/udc!"
@@ -32,11 +32,11 @@ start_gadget() {
         log_msg "ERROR: Could not mount configfs. Is CONFIG_USB_CONFIGFS enabled?"
         exit 1
     fi
-    # Unmount Data Partition to release lock
-    # (Ignore error if not mounted)
+    
+    # Safety: Ensure data is unmounted (just in case)
     umount /mnt/data 2>/dev/null
 
-    # 3. Create Gadget
+    # 3. Create Gadget Structure
     mkdir -p $GADGET_DIR
     cd $GADGET_DIR
 
@@ -54,17 +54,17 @@ start_gadget() {
     echo "Config 1" > configs/c.1/strings/0x409/configuration
     echo 500 > configs/c.1/MaxPower
 
-    # 4. Serial Function
+    # 4. Serial Function (Console)
     mkdir -p functions/acm.usb0
     ln -s functions/acm.usb0 configs/c.1/
     log_msg "Serial function created."
 
-    # 5. Mass Storage Function
+    # 5. Mass Storage Function (Data Partition)
     mkdir -p functions/mass_storage.usb0
     echo 1 > functions/mass_storage.usb0/stall
     
-    # Check if data partition exists
     if [ -b "$DATA_PART" ]; then
+        # LUN 0 is best for Windows visibility
         echo "$DATA_PART" > functions/mass_storage.usb0/lun.0/file
         echo 0 > functions/mass_storage.usb0/lun.0/ro
         
@@ -77,16 +77,17 @@ start_gadget() {
         log_msg "WARNING: $DATA_PART not found. Skipping Mass Storage."
     fi
 
-    # 6. Enable
+    # 6. Enable the Gadget (This triggers the 'configured' state on the PC)
     echo "$UDC_NAME" > UDC
     log_msg "Gadget Successfully Enabled!"
 }
 
 case "$1" in
   start)
+    # Just start it. If no PC is connected, it simply waits.
     start_gadget
     ;;
   stop)
-    echo "" > UDC
+    echo "" > $GADGET_DIR/UDC
     ;;
 esac

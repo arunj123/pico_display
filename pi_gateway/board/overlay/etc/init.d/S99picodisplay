@@ -1,0 +1,64 @@
+#!/bin/sh
+# /etc/init.d/S99picodisplay
+#
+# Start the Pico Display Python script
+
+WORK_DIR="/opt/pico_display"
+DAEMON="python3"
+ARGS="display_manager.py"
+PIDFILE="/var/run/picodisplay.pid"
+
+start() {
+    printf "Starting Pico Display... "
+    # Wait for network to be up
+    sleep 10
+    cd $WORK_DIR
+    
+    # We use a shell to pipe output to logger. 
+    # This creates a shell process (tracked by PIDFILE) and a python child.
+    start-stop-daemon -S -b -m -p $PIDFILE --exec /bin/sh -- -c "exec $DAEMON $ARGS 2>&1 | logger -t picodisplay"
+    
+    [ $? = 0 ] && echo "OK" || echo "FAIL"
+}
+
+stop() {
+    printf "Stopping Pico Display... "
+    
+    # 1. Stop the shell wrapper (removes the PID file)
+    start-stop-daemon -K -q -p $PIDFILE
+    
+    # 2. Aggressively kill the actual Python process
+    # The shell wrapper often fails to pass the kill signal to the child.
+    # We try 'pkill' first (matches command line), then fallback to 'killall'
+    if command -v pkill > /dev/null; then
+        pkill -f "display_manager.py"
+    else
+        # Fallback for minimal systems without pkill
+        killall python3 2>/dev/null
+    fi
+
+    [ $? = 0 ] && echo "OK" || echo "FAIL"
+}
+
+restart() {
+    stop
+    sleep 1
+    start
+}
+
+case "$1" in
+  start)
+    start
+    ;;
+  stop)
+    stop
+    ;;
+  restart|reload)
+    restart
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart}"
+    exit 1
+esac
+
+exit $?

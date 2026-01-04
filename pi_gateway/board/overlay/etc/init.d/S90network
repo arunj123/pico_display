@@ -139,7 +139,6 @@ start() {
 }
 
 stop() {
-    killall python3
     killall wpa_supplicant
     killall udhcpc
     umount $DATA_DIR 2>/dev/null
