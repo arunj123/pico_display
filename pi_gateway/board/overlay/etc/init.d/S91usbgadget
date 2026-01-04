@@ -1,0 +1,92 @@
+#!/bin/sh
+
+GADGET_DIR=/sys/kernel/config/usb_gadget/mygadget
+VID="0x1d6b"
+PID="0x0104"
+SERIAL="fedcba9876543210"
+MANUFACTURER="Buildroot"
+PRODUCT="PiZero Serial+Storage"
+DATA_PART="/dev/mmcblk0p3"
+
+log_msg() {
+    # Print to the system console (screen) and kernel log
+    echo "[USB-GADGET] $1" > /dev/console
+}
+
+start_gadget() {
+    log_msg "--- Starting USB Gadget Setup ---"
+
+    # 1. Check Hardware Driver (The #1 Failure Point)
+    UDC_NAME=$(ls /sys/class/udc 2>/dev/null | head -n 1)
+    if [ -z "$UDC_NAME" ]; then
+        log_msg "CRITICAL ERROR: No UDC device found in /sys/class/udc!"
+        log_msg "CHECK: 1. 'dtoverlay=dwc2' in config.txt"
+        log_msg "CHECK: 2. 'dwc2.dtbo' exists in /overlays on SD card"
+        exit 1
+    fi
+    log_msg "UDC Hardware Found: $UDC_NAME"
+
+    # 2. Mount ConfigFS
+    mount -t configfs none /sys/kernel/config
+    if [ $? -ne 0 ]; then
+        log_msg "ERROR: Could not mount configfs. Is CONFIG_USB_CONFIGFS enabled?"
+        exit 1
+    fi
+    # Unmount Data Partition to release lock
+    # (Ignore error if not mounted)
+    umount /mnt/data 2>/dev/null
+
+    # 3. Create Gadget
+    mkdir -p $GADGET_DIR
+    cd $GADGET_DIR
+
+    echo $VID > idVendor
+    echo $PID > idProduct
+    echo 0x0100 > bcdDevice
+    echo 0x0200 > bcdUSB
+
+    mkdir -p strings/0x409
+    echo $SERIAL > strings/0x409/serialnumber
+    echo $MANUFACTURER > strings/0x409/manufacturer
+    echo $PRODUCT > strings/0x409/product
+
+    mkdir -p configs/c.1/strings/0x409
+    echo "Config 1" > configs/c.1/strings/0x409/configuration
+    echo 500 > configs/c.1/MaxPower
+
+    # 4. Serial Function
+    mkdir -p functions/acm.usb0
+    ln -s functions/acm.usb0 configs/c.1/
+    log_msg "Serial function created."
+
+    # 5. Mass Storage Function
+    mkdir -p functions/mass_storage.usb0
+    echo 1 > functions/mass_storage.usb0/stall
+    
+    # Check if data partition exists
+    if [ -b "$DATA_PART" ]; then
+        echo "$DATA_PART" > functions/mass_storage.usb0/lun.0/file
+        echo 0 > functions/mass_storage.usb0/lun.0/ro
+        
+        # Must be 1 because we are sharing a partition, not a whole disk
+        echo 1 > functions/mass_storage.usb0/lun.0/removable
+        
+        ln -s functions/mass_storage.usb0 configs/c.1/
+        log_msg "Mass Storage linked to $DATA_PART"
+    else
+        log_msg "WARNING: $DATA_PART not found. Skipping Mass Storage."
+    fi
+
+    # 6. Enable
+    echo "$UDC_NAME" > UDC
+    log_msg "Gadget Successfully Enabled!"
+}
+
+case "$1" in
+  start)
+    start_gadget
+    ;;
+  stop)
+    echo "" > UDC
+    ;;
+esac

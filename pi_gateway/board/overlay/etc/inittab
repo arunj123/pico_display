@@ -1,0 +1,18 @@
+# /etc/inittab
+# 1. System Initialization (Mounting filesystems, etc.)
+::sysinit:/bin/mount -t proc proc /proc
+::sysinit:/bin/mount -o remount,rw /
+::sysinit:/bin/mkdir -p /dev/pts
+::sysinit:/bin/mount -a
+::sysinit:/bin/hostname -F /etc/hostname
+::sysinit:/etc/init.d/rcS
+
+# 2. Shell on console (HDMI) - Optional
+tty1::respawn:/sbin/getty -L  tty1 0 vt100
+
+# 3. Shell on USB Gadget (Your custom line)
+ttyGS0::respawn:/sbin/getty -L -n -l /bin/sh ttyGS0 115200 vt100
+
+# 4. Shutdown stuff
+::shutdown:/bin/umount -a -r
+::ctrlaltdel:/sbin/reboot

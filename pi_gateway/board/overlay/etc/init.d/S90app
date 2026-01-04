@@ -38,7 +38,7 @@ start() {
         if [ $TIMEOUT -gt 60 ]; then
             log "ERROR: Data partition /dev/mmcblk0p3 not found!"
             log "Partitions seen by kernel:"
-            cat /proc/partitions > /dev/tty1
+            cat /proc/partitions
             break
         fi
     done
@@ -46,14 +46,25 @@ start() {
     # 2. Mount Data Partition
     if [ -b "/dev/mmcblk0p3" ]; then
         mkdir -p $DATA_DIR
-        
+
         # Check if already mounted (by fstab)
         if mountpoint -q $DATA_DIR; then
-            log "Partition already mounted by fstab."
-        else
-            log "Mounting partition manually..."
-            mount /dev/mmcblk0p3 $DATA_DIR
+            log "Partition already mounted by fstab. Unmounting..."
+            umount -f $DATA_DIR
         fi
+
+        # 2. Repair Filesystem (Auto-clear Dirty Bit)
+        # -a = automatically repair, -w = write changes immediately
+        fsck.vfat -a -w /dev/mmcblk0p3
+
+        log "Mounting partition manually..."
+        mount /dev/mmcblk0p3 $DATA_DIR
+
+        # Since we are RW now, let's refresh the entropy seed for the next boot
+        log "Saving new random seed..."
+        mkdir -p "$DATA_DIR/seedrng" 2>/dev/null || true
+        # Run seedrng to save new entropy to the symlinked location
+        seedrng || true
         
         # Check/Create Config
         if [ ! -f "$WIFI_CONF" ]; then
@@ -84,18 +95,18 @@ start() {
     # Start RNG service to prevent WPA hangs
     rngd -r /dev/hwrng
 
+    cp $WIFI_CONF /tmp/wifi.conf
+
+    # Unmount Data Partition to release lock
+    umount /mnt/data 2>/dev/null
+
     # Start wpa_supplicant with logging to /tmp/wpa.log
     log "Starting wpa_supplicant..."
-    wpa_supplicant -B -i wlan0 -c $WIFI_CONF -f /tmp/wpa.log -t -d
+    wpa_supplicant -B -i wlan0 -c /tmp/wifi.conf -f /tmp/wpa.log -t -d
     
     # Wait a moment for association
     log "Waiting for association..."
     sleep 5
-    
-    # Dump the log to screen for debugging (last 20 lines)
-    log "--- WPA LOG START ---"
-    tail -n 20 /tmp/wpa.log > /dev/tty1
-    log "--- WPA LOG END ---"
 
     # Start DHCP
     if [ -x "$DHCP_SCRIPT" ]; then
@@ -126,9 +137,7 @@ start() {
     fi
     log "=========================================="
     log ""
-log "Checking Kernel Log for WiFi errors..."
-dmesg | grep -i "brcm" > /dev/tty1
-dmesg | grep -i "firmware" > /dev/tty1
+
     # 5. Run Python Application
     log "Starting Python App..."
     python3 $APP_SCRIPT &
@@ -138,7 +147,7 @@ stop() {
     killall python3
     killall wpa_supplicant
     killall udhcpc
-    umount $DATA_DIR
+    umount $DATA_DIR 2>/dev/null
 }
 
 case "$1" in

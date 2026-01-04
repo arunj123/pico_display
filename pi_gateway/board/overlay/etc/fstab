@@ -5,6 +5,7 @@ tmpfs           /tmp        tmpfs       defaults            0       0
 tmpfs           /run        tmpfs       defaults            0       0
 proc            /proc       proc        defaults            0       0
 sysfs           /sys        sysfs       defaults            0       0
-# Data Partition
-/dev/mmcblk0p3  /mnt/data   vfat        defaults,ro         0       0
-devpts    /dev/pts    devpts    gid=5,mode=620    0 0
+# Data Partition - mounted when required by init scripts
+# /dev/mmcblk0p3  /mnt/data   vfat        defaults,ro         0       0
+# devpts for pseudo terminal support needed by sshd
+devpts          /dev/pts    devpts      gid=5,mode=620      0       0

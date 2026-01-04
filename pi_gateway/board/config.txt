@@ -5,9 +5,7 @@ kernel=Image
 arm_64bit=1
 
 # 2. Serial Console (Critical for Zero 2 W)
-# Moves Bluetooth to mini-UART so the main UART is free for console
-dtoverlay=miniuart-bt
-enable_uart=1
+dtoverlay=dwc2
 
 # 3. Boot Files
 start_file=start.elf
