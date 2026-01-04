@@ -137,3 +137,30 @@ If OpenOCD fails with `unable to find a matching CMSIS-DAP device` or `could not
     * It calculates the bounding box of changed pixels (the "Diff").
     * It slices this area into 8KB "Tiles" (payloads).
     * It waits for an application-level `ACK` from the Pico before sending the next tile, ensuring 100% reliability.
+
+## Hosting python script using Buildroot cooked IOT image
+
+make -C buildroot O=$(pwd)/output menuconfig
+make -C buildroot O=$(pwd)/output savedefconfig
+
+./scripts/build_pi_image.sh
+
+make -C buildroot O=$(pwd)/output busybox-menuconfig
+cp ./output/build/busybox-*/.config ./pi_gateway/board/busybox.config
+
+To check content of data partition
+./output/host/bin/mdir -i output/images/data.vfat ::/
+
+To check content of root partition
+unsquashfs -ll output/images/rootfs.squashfs | grep "seedrng"
+unsquashfs output/images/rootfs.squashfs etc/inittab
+
+
+make -C buildroot O=$(pwd)/output linux-menuconfig
+make -C buildroot O=$(pwd)/output linux-savedefconfig
+mv output/build/linux-custom/defconfig pi_gateway/board/linux_kconfig
+make -C buildroot O=$(pwd)/output linux-dirclean
+make -C buildroot O=$(pwd)/output linux-reinstall
+rpi-wifi-firmware-rebuild
+linux-firmware-rebuild
+make -C buildroot O=$(pwd)/output rpi-firmware-rebuild
