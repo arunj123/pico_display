@@ -19,9 +19,9 @@ FRAME_MAGIC = 0xAA
 FRAME_HEADER_FORMAT = "<BBH"
 FRAME_HEADER_SIZE = struct.calcsize(FRAME_HEADER_FORMAT)
 FRAME_TYPE_IMAGE_TILE = 0x02
-FRAME_TYPE_TILE_ACK = 0x03 # Re-enabled
-FRAME_TYPE_TILE_NACK = 0x04 # Re-enabled
-IMAGE_TILE_HEADER_FORMAT = "<HHHHI"  # x, y, width, height, crc32
+FRAME_TYPE_TILE_ACK = 0x03
+FRAME_TYPE_TILE_NACK = 0x04
+IMAGE_TILE_HEADER_FORMAT = "<HHHHI"
 IMAGE_TILE_HEADER_SIZE = struct.calcsize(IMAGE_TILE_HEADER_FORMAT)
 MAX_PIXEL_DATA_SIZE = TILE_PAYLOAD_SIZE - IMAGE_TILE_HEADER_SIZE
 
@@ -30,11 +30,12 @@ LOCATION_LAT = 49.4247
 LOCATION_LON = 11.0896
 WEATHER_UPDATE_INTERVAL_SECONDS = 15 * 60
 
-# -- UI Layout and Fonts (Polished Sizes) --
+# -- UI Layout and Fonts --
 try:
+    # UPDATED: Look for fonts in a 'fonts' subdirectory relative to this script
     _CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-    FONT_PATH_BOLD = os.path.join(_CURRENT_DIR, '..', "fonts", "FreeSansBold.ttf")
-    FONT_PATH_REGULAR = os.path.join(_CURRENT_DIR, '..', "fonts", "Ubuntu-L.ttf")
+    FONT_PATH_BOLD = os.path.join(_CURRENT_DIR, "fonts", "FreeSansBold.ttf")
+    FONT_PATH_REGULAR = os.path.join(_CURRENT_DIR, "fonts", "Ubuntu-L.ttf")
     
     FONT_TIME = ImageFont.truetype(FONT_PATH_BOLD, 72)
     FONT_DATE = ImageFont.truetype(FONT_PATH_REGULAR, 24)
@@ -43,17 +44,20 @@ try:
     FONT_INFO_HEADER = ImageFont.truetype(FONT_PATH_REGULAR, 16)
     FONT_INFO_VALUE = ImageFont.truetype(FONT_PATH_BOLD, 18)
 except IOError:
-    raise IOError("Error: Font files not found.")
+    # Fallback if fonts are missing, prevents immediate crash during dev
+    print("Warning: Custom fonts not found. Using default.")
+    FONT_TIME = ImageFont.load_default()
+    FONT_DATE = ImageFont.load_default()
+    FONT_TEMP = ImageFont.load_default()
+    FONT_WEATHER = ImageFont.load_default()
+    FONT_INFO_HEADER = ImageFont.load_default()
+    FONT_INFO_VALUE = ImageFont.load_default()
 
 # -- UI Color Theme --
 def get_current_theme():
     """Selects a color theme based on the current hour of the day."""
     hour = datetime.now().hour
     
-    # For testing purposes, assign a number between 0-23
-    # hour = randrange(0, 24)
-    print(f"Selected hour for theme: {hour}")
-
     if 5 <= hour < 12: # Morning
         return {
             "name": "Morning Sky",
@@ -88,4 +92,4 @@ def get_current_theme():
         }
 
 # -- State File --
-STATE_IMAGE_PATH = "current_display.png"
+STATE_IMAGE_PATH = "/tmp/current_display.png"

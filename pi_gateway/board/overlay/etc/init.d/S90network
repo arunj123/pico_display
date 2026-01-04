@@ -3,7 +3,6 @@
 # Paths
 DATA_DIR="/mnt/data"
 WIFI_CONF="$DATA_DIR/wifi.conf"
-APP_SCRIPT="/usr/bin/main.py"
 DEFAULT_WIFI="/etc/wifi_defaults.conf"
 DHCP_SCRIPT="/usr/share/udhcpc/default.script"
 
@@ -137,10 +136,6 @@ start() {
     fi
     log "=========================================="
     log ""
-
-    # 5. Run Python Application
-    log "Starting Python App..."
-    python3 $APP_SCRIPT &
 }
 
 stop() {
