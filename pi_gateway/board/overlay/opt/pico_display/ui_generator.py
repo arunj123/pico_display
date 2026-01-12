@@ -42,13 +42,26 @@ def _draw_background(theme: dict) -> Image.Image:
         draw.line([(x, 0), (x, config.LCD_HEIGHT)], fill=(r,g,b))
     return image
 
-def _create_weather_icon(icon_name: str, size: tuple[int, int]) -> Image.Image:
+def _create_weather_icon(icon_name: str, size: tuple[int, int], is_stale: bool = False) -> Image.Image:
+    # Handle transparency
     icon = Image.new('RGBA', size, (0,0,0,0)); draw = ImageDraw.Draw(icon); w,h=size
-    C_SUN, C_MOON, C_CLOUD, SHADOW = (255,204,0), (240,240,230), (220,220,220), (0,0,0,50)
+    
+    # Define base colors. If stale, desaturate/dim them.
+    if is_stale:
+        C_SUN = (180, 160, 100) # Dim gold
+        C_MOON = (180, 180, 180) # Grey
+        C_CLOUD = (150, 150, 150) # Grey
+    else:
+        C_SUN = (255,204,0)
+        C_MOON = (240,240,230)
+        C_CLOUD = (220,220,220)
+        
+    SHADOW = (0,0,0,50)
     so = (4,4)
     def ds(o=(0,0),c=C_SUN): ce,r=(w/2+o[0],h/2+o[1]),22;draw.ellipse([(ce[0]-r,ce[1]-r),(ce[0]+r,ce[1]+r)],fill=c);[draw.line([(ce[0]+cos(radians(i*30))*(r+4),ce[1]+sin(radians(i*30))*(r+4)),(ce[0]+cos(radians(i*30))*(r+10),ce[1]+sin(radians(i*30))*(r+10))],fill=c,width=4) for i in range(12)]
     def dc(o=(0,0),c=C_MOON): cx,cy,r=w/2+o[0],h/2+o[1],22;draw.ellipse([(cx-r,cy-r),(cx+r,cy+r)],fill=c);draw.ellipse([(cx-r+10,cy-r-4),(cx+r+10,cy+r-4)],fill=(0,0,0,80))
     def dcl(o=(0,0),c=C_CLOUD): x,y=o[0]+w/2,o[1]+h/2;draw.ellipse([(x-40,y-5),(x+15,y+30)],fill=c);draw.ellipse([(x-20,y-25),(x+40,y+20)],fill=c)
+    
     if icon_name=="sun": ds(so,SHADOW);ds()
     elif icon_name=="moon": dc(so,SHADOW);dc()
     elif icon_name=="sun_cloud": dcl((5,8),SHADOW);ds((-12,-12));dcl()
@@ -74,7 +87,7 @@ def _draw_info_icon(icon_type: str, size: tuple, color: tuple) -> Image.Image:
         draw.arc((0, -h/2 + h, w, h/2 + h), 10, 170, fill=color, width=2)
     return icon
 
-def create_ui_image(time_str: str, date_str: str, weather_info: dict | None) -> Image.Image:
+def create_ui_image(time_str: str, date_str: str, weather_info: dict | None, is_stale: bool = False, stale_age_str: str = "") -> Image.Image:
     """
     Composes the final, polished UI with a 3-zone landscape layout.
     """
@@ -82,8 +95,13 @@ def create_ui_image(time_str: str, date_str: str, weather_info: dict | None) -> 
     image = _draw_background(theme)
     draw = ImageDraw.Draw(image)
     
+    # --- Define Colors based on Stale State ---
+    primary_color = config.COLOR_STALE if is_stale else theme["text_primary"]
+    secondary_color = config.COLOR_STALE if is_stale else theme["text_secondary"]
+    
     # --- Define Layout Zones ---
-    separator_y = 150
+    # Moved separator down to 160 to give top section more room
+    separator_y = 160 
     
     # --- Visual Separator ---
     draw.line([(15, separator_y), (config.LCD_WIDTH - 15, separator_y)], fill=(255,255,255,50), width=1)
@@ -91,66 +109,89 @@ def create_ui_image(time_str: str, date_str: str, weather_info: dict | None) -> 
     # =========================================================================
     # --- Top Zone (Split into Left and Right)
     # =========================================================================
-    top_center_y = separator_y // 2
+    top_center_y = separator_y // 2 # 80
     
     # --- Adjust the center point for the left column ---
     left_center_x = 90
     
     right_center_x = 240
     
-    # --- Top-Left: Time and Date ---
+    # --- Top-Left: Time and Date (Always Valid) ---
     draw.text((left_center_x, 65), time_str, font=config.FONT_TIME, fill=theme["text_primary"], anchor="ms")
     draw.text((left_center_x, 110), date_str, font=config.FONT_DATE, fill=theme["text_secondary"], anchor="ms")
 
     # --- Top-Right: Weather ---
     if weather_info:
         icon_size = (90, 70)
-        icon_img = _create_weather_icon(weather_info['icon'], icon_size)
-        image.paste(icon_img, (right_center_x - icon_size[0] // 2, top_center_y - 75), icon_img)
+        icon_img = _create_weather_icon(weather_info['icon'], icon_size, is_stale)
+        # Shifted icon up slightly due to new top_center_y
+        image.paste(icon_img, (right_center_x - icon_size[0] // 2, top_center_y - 80), icon_img)
         
         temp_text = f"{weather_info['temperature']}°C"
         desc_text = weather_info['description']
         
-        draw.text((right_center_x, top_center_y + 30), temp_text, font=config.FONT_TEMP, fill=theme["text_primary"], anchor="ms")
-        draw.text((right_center_x, top_center_y + 60), desc_text, font=config.FONT_WEATHER, fill=theme["text_secondary"], anchor="ms")
+        # Compacted vertical spacing slightly
+        draw.text((right_center_x, top_center_y + 25), temp_text, font=config.FONT_TEMP, fill=primary_color, anchor="ms")
+        draw.text((right_center_x, top_center_y + 50), desc_text, font=config.FONT_WEATHER, fill=secondary_color, anchor="ms")
+
+        # --- Show Data Age if Stale ---
+        if is_stale and stale_age_str:
+             # Moved to +70 to fit above separator (160)
+             draw.text((right_center_x, top_center_y + 70), f"Updated {stale_age_str} ago", font=config.FONT_DATA_AGE, fill=config.COLOR_STALE, anchor="ms")
+
+    else:
+        # --- Placeholder Mode (No Data) ---
+        draw.text((right_center_x, top_center_y + 30), "--°C", font=config.FONT_TEMP, fill=config.COLOR_STALE, anchor="ms")
+        draw.text((right_center_x, top_center_y + 60), "No Data", font=config.FONT_WEATHER, fill=config.COLOR_STALE, anchor="ms")
+        
+        # Draw a simple placeholder circle for icon
+        r = 20
+        cx, cy = right_center_x, top_center_y - 40
+        draw.ellipse([(cx-r, cy-r), (cx+r, cy+r)], outline=config.COLOR_STALE, width=2)
+        draw.text((cx, cy), "?", font=config.FONT_INFO_VALUE, fill=config.COLOR_STALE, anchor="mm")
+
 
     # =========================================================================
     # --- Bottom Zone: Additional Info
     # =========================================================================
+    
+    # Common layout calc
+    num_cols = 4
+    col_width = config.LCD_WIDTH / num_cols
+    col_centers = [int(col_width * (i + 0.5)) for i in range(num_cols)]
+    
+    y_pos_icon = separator_y + 25
+    y_pos_header = y_pos_icon + 20
+    y_pos_value = y_pos_header + 22
+    icon_size_small = 20
+
+    # Define headers and logic for values
+    labels = ["Wind", "Humidity", "Sunrise", "Sunset"]
+    icon_types = ["wind", "humidity", "sunrise", "sunset"]
+    
     if weather_info:
-        icon_size_small = 20
-        icon_color = theme["text_secondary"]
+        values = [
+            f"{weather_info['windspeed']} km/h",
+            f"{weather_info['humidity']}%",
+            weather_info['sunrise'],
+            weather_info['sunset']
+        ]
+        active_icon_color = secondary_color
+        active_val_color = primary_color
+    else:
+        values = ["...", "...", "--:--", "--:--"]
+        active_icon_color = config.COLOR_STALE
+        active_val_color = config.COLOR_STALE
+
+    for i in range(4):
+        # Draw Icon
+        icon_img = _draw_info_icon(icon_types[i], (icon_size_small, icon_size_small), active_icon_color)
+        image.paste(icon_img, (col_centers[i] - icon_size_small // 2, y_pos_icon - icon_size_small // 2), icon_img)
         
-        num_cols = 4
-        col_width = config.LCD_WIDTH / num_cols
-        col_centers = [int(col_width * (i + 0.5)) for i in range(num_cols)]
+        # Draw Header
+        draw.text((col_centers[i], y_pos_header), labels[i], font=config.FONT_INFO_HEADER, fill=active_icon_color, anchor="ms")
         
-        y_pos_icon = separator_y + 25
-        y_pos_header = y_pos_icon + 20
-        y_pos_value = y_pos_header + 22
-
-        # Col 1: Wind
-        wind_icon_img = _draw_info_icon('wind', (icon_size_small, icon_size_small), icon_color)
-        image.paste(wind_icon_img, (col_centers[0] - icon_size_small // 2, y_pos_icon - icon_size_small // 2), wind_icon_img)
-        draw.text((col_centers[0], y_pos_header), "Wind", font=config.FONT_INFO_HEADER, fill=icon_color, anchor="ms")
-        draw.text((col_centers[0], y_pos_value), f"{weather_info['windspeed']} km/h", font=config.FONT_INFO_VALUE, fill=theme["text_primary"], anchor="ms")
-
-        # Col 2: Humidity
-        humidity_icon_img = _draw_info_icon('humidity', (icon_size_small, icon_size_small), icon_color)
-        image.paste(humidity_icon_img, (col_centers[1] - icon_size_small // 2, y_pos_icon - icon_size_small // 2), humidity_icon_img)
-        draw.text((col_centers[1], y_pos_header), "Humidity", font=config.FONT_INFO_HEADER, fill=icon_color, anchor="ms")
-        draw.text((col_centers[1], y_pos_value), f"{weather_info['humidity']}%", font=config.FONT_INFO_VALUE, fill=theme["text_primary"], anchor="ms")
-
-        # Col 3: Sunrise
-        sunrise_icon_img = _draw_info_icon('sunrise', (icon_size_small, icon_size_small), icon_color)
-        image.paste(sunrise_icon_img, (col_centers[2] - icon_size_small // 2, y_pos_icon - 5), sunrise_icon_img)
-        draw.text((col_centers[2], y_pos_header), "Sunrise", font=config.FONT_INFO_HEADER, fill=icon_color, anchor="ms")
-        draw.text((col_centers[2], y_pos_value), weather_info['sunrise'], font=config.FONT_INFO_VALUE, fill=theme["text_primary"], anchor="ms")
-
-        # Col 4: Sunset
-        sunset_icon_img = _draw_info_icon('sunset', (icon_size_small, icon_size_small), icon_color)
-        image.paste(sunset_icon_img, (col_centers[3] - icon_size_small // 2, y_pos_icon - 5), sunset_icon_img)
-        draw.text((col_centers[3], y_pos_header), "Sunset", font=config.FONT_INFO_HEADER, fill=icon_color, anchor="ms")
-        draw.text((col_centers[3], y_pos_value), weather_info['sunset'], font=config.FONT_INFO_VALUE, fill=theme["text_primary"], anchor="ms")
+        # Draw Value
+        draw.text((col_centers[i], y_pos_value), values[i], font=config.FONT_INFO_VALUE, fill=active_val_color, anchor="ms")
         
     return image.convert('RGB')

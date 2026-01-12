@@ -3,6 +3,7 @@
 Handles fetching and parsing weather data from the free Open-Meteo API.
 """
 import requests
+import time
 from typing import Optional, Dict, Any
 from datetime import datetime
 
@@ -11,6 +12,7 @@ def get_weather(lat: float, lon: float) -> Optional[Dict[str, Any]]:
     url = (f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
            "&current=temperature_2m,relative_humidity_2m,is_day,weather_code,wind_speed_10m"
            "&daily=sunrise,sunset&timezone=auto")
+
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
@@ -26,6 +28,7 @@ def get_weather(lat: float, lon: float) -> Optional[Dict[str, Any]]:
             'icon': _map_weather_code_to_icon(current['weather_code'], current.get('is_day', 1)),
             'sunrise': datetime.fromisoformat(daily['sunrise'][0]).strftime('%H:%M'),
             'sunset': datetime.fromisoformat(daily['sunset'][0]).strftime('%H:%M'),
+            'timestamp': time.time() # Capture exact time of successful fetch
         }
         
         print(f"Weather Updated: {weather_info['temperature']}°C, {weather_info['description']}, Wind: {weather_info['windspeed']}km/h")

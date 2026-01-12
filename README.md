@@ -164,3 +164,15 @@ make -C buildroot O=$(pwd)/output linux-reinstall
 rpi-wifi-firmware-rebuild
 linux-firmware-rebuild
 make -C buildroot O=$(pwd)/output rpi-firmware-rebuild
+
+To configure Wifi, connect Raspberry Pi Zero 2W device to PC, a device will appear. Create/updat wifi.conf.
+'''
+country=DE
+update_config=1
+
+network={
+    ssid="DEFAULT_WIFI_SSID"
+    psk="DEFAULT_WIFI_PASSWORD"
+    key_mgmt=WPA-PSK
+}
+'''

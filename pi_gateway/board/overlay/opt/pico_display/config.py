@@ -32,7 +32,6 @@ WEATHER_UPDATE_INTERVAL_SECONDS = 15 * 60
 
 # -- UI Layout and Fonts --
 try:
-    # UPDATED: Look for fonts in a 'fonts' subdirectory relative to this script
     _CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
     FONT_PATH_BOLD = os.path.join(_CURRENT_DIR, "fonts", "FreeSansBold.ttf")
     FONT_PATH_REGULAR = os.path.join(_CURRENT_DIR, "fonts", "Ubuntu-L.ttf")
@@ -43,8 +42,9 @@ try:
     FONT_WEATHER = ImageFont.truetype(FONT_PATH_REGULAR, 20)
     FONT_INFO_HEADER = ImageFont.truetype(FONT_PATH_REGULAR, 16)
     FONT_INFO_VALUE = ImageFont.truetype(FONT_PATH_BOLD, 18)
+    # Increased size from 12 to 14 for better visibility
+    FONT_DATA_AGE = ImageFont.truetype(FONT_PATH_REGULAR, 14) 
 except IOError:
-    # Fallback if fonts are missing, prevents immediate crash during dev
     print("Warning: Custom fonts not found. Using default.")
     FONT_TIME = ImageFont.load_default()
     FONT_DATE = ImageFont.load_default()
@@ -52,8 +52,12 @@ except IOError:
     FONT_WEATHER = ImageFont.load_default()
     FONT_INFO_HEADER = ImageFont.load_default()
     FONT_INFO_VALUE = ImageFont.load_default()
+    FONT_DATA_AGE = ImageFont.load_default()
 
 # -- UI Color Theme --
+# Brightened from (160, 160, 160) to (200, 200, 200) for better contrast
+COLOR_STALE = (200, 200, 200) 
+
 def get_current_theme():
     """Selects a color theme based on the current hour of the day."""
     hour = datetime.now().hour

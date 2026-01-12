@@ -62,7 +62,6 @@ class DeviceManager:
             self.sock = None
             return False
 
-    # ... [Rest of class methods send_image_diff, _send_frame_and_wait_for_ack, close are unchanged] ...
     def send_image_diff(self, new_image, previous_image):
         if not self.sock: return False, previous_image
 
@@ -166,6 +165,17 @@ def pack_frame(frame_type, payload):
     header = struct.pack(config.FRAME_HEADER_FORMAT, config.FRAME_MAGIC, frame_type, len(payload))
     return header + payload
 
+def format_time_diff(diff_seconds):
+    """Formats seconds into a short readable string (5m, 1h, etc)."""
+    if diff_seconds < 60:
+        return "< 1m"
+    elif diff_seconds < 3600:
+        minutes = int(diff_seconds / 60)
+        return f"{minutes}m"
+    else:
+        hours = int(diff_seconds / 3600)
+        return f"{hours}h"
+
 def main():
     if os.path.exists(config.STATE_IMAGE_PATH):
         try: os.remove(config.STATE_IMAGE_PATH)
@@ -174,8 +184,12 @@ def main():
     manager = DeviceManager()
     previous_image = None
     previous_time_string = ""
+    
+    # Persistent weather state
     current_weather = None
     last_weather_check = 0
+    # Force initial update
+    force_update = True 
 
     # --- DISCOVERY PHASE ---
     # Attempt to find device. If not found, use default from config.
@@ -194,20 +208,62 @@ def main():
             previous_image = None
 
             while True:
-                if (time.time() - last_weather_check) > config.WEATHER_UPDATE_INTERVAL_SECONDS:
-                    current_weather = weather.get_weather(config.LOCATION_LAT, config.LOCATION_LON)
-                    last_weather_check = time.time()
-                    previous_image = None
+                # --- Weather Update Logic ---
+                # Check weather if interval passed OR if we never had weather data (force update)
+                time_since_last = time.time() - last_weather_check
                 
+                if force_update or time_since_last > config.WEATHER_UPDATE_INTERVAL_SECONDS:
+                    print("Fetching weather data...")
+                    # Set force_update to False immediately to prevent rapid loops on failure
+                    force_update = False 
+                    
+                    new_weather = weather.get_weather(config.LOCATION_LAT, config.LOCATION_LON)
+                    
+                    if new_weather:
+                        current_weather = new_weather
+                        last_weather_check = time.time()
+                    else:
+                        print("Weather fetch failed. Keeping previous data (if any). Retrying in 1 minute.")
+                        # Schedule retry in 60 seconds by manipulating last_weather_check
+                        # We want (now - last) to be (INTERVAL - 60), so we wait 60s to reach INTERVAL
+                        last_weather_check = time.time() - config.WEATHER_UPDATE_INTERVAL_SECONDS + 60
+                
+                # --- Stale Data Calculation ---
+                is_stale = False
+                stale_age_str = ""
+                
+                if current_weather:
+                    # Calculate how old the data actually is based on its internal timestamp
+                    data_age = time.time() - current_weather.get('timestamp', time.time())
+                    
+                    # Consider data stale if it's older than the interval + small buffer
+                    if data_age > (config.WEATHER_UPDATE_INTERVAL_SECONDS + 60):
+                        is_stale = True
+                        stale_age_str = format_time_diff(data_age)
+
+                # --- UI Rendering ---
                 now = datetime.now()
                 time_string = now.strftime("%H:%M")
                 
                 if time_string == previous_time_string and previous_image is not None:
+                    # If time hasn't changed, we usually sleep. 
+                    # BUT if weather just went stale or updated, we need to redraw.
+                    # For simplicity, we redraw if weather changed or time changed.
+                    # Checking deeper logic is complex, so strict 1-min sleep is fine for clock
+                    # but might miss immediate weather updates.
+                    # Current logic: Redraw on time change.
                     time.sleep(1)
                     continue
                 
                 date_string = now.strftime("%a, %b %d")
-                new_image = ui_generator.create_ui_image(time_string, date_string, current_weather)
+                
+                new_image = ui_generator.create_ui_image(
+                    time_string, 
+                    date_string, 
+                    current_weather,
+                    is_stale=is_stale,
+                    stale_age_str=stale_age_str
+                )
 
                 new_image_binary = ui_generator.convert_image_to_rgb565(new_image)
                 quantized_new_image = ui_generator.reconstruct_image_from_rgb565(new_image_binary, new_image.width, new_image.height)
