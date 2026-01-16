@@ -47,6 +47,10 @@ class DeviceManager:
     def connect(self) -> bool:
         if self.sock: return True
         
+        # Guard clause: If no IP is set (discovery failed and no fallback), don't attempt connect
+        if not self.device_ip:
+            return False
+
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.settimeout(5.0) 
@@ -57,7 +61,7 @@ class DeviceManager:
             self.sock.settimeout(15.0) 
             print("Connected.")
             return True
-        except (ConnectionRefusedError, OSError, socket.timeout) as e:
+        except (ConnectionRefusedError, OSError, socket.timeout, TypeError) as e:
             print(f"Connection error: {e}")
             self.sock = None
             return False
@@ -192,14 +196,17 @@ def main():
     force_update = True 
 
     # --- DISCOVERY PHASE ---
-    # Attempt to find device. If not found, use default from config.
+    # Attempt to find device. If not found, check if a backup exists.
     if not manager.find_device():
-        print(f"Using default IP from config: {manager.device_ip}")
+        if manager.device_ip:
+            print(f"Using default IP from config: {manager.device_ip}")
+        else:
+            print("No IP found. Will retry discovery in the loop.")
 
     while True:
         try:
             if not manager.connect():
-                # On connection failure, try discovery again before retrying connect
+                # On connection failure (or missing IP), try discovery again
                 print("Retrying discovery...")
                 manager.find_device()
                 time.sleep(5)
@@ -214,7 +221,6 @@ def main():
                 
                 if force_update or time_since_last > config.WEATHER_UPDATE_INTERVAL_SECONDS:
                     print("Fetching weather data...")
-                    # Set force_update to False immediately to prevent rapid loops on failure
                     force_update = False 
                     
                     new_weather = weather.get_weather(config.LOCATION_LAT, config.LOCATION_LON)
@@ -223,9 +229,7 @@ def main():
                         current_weather = new_weather
                         last_weather_check = time.time()
                     else:
-                        print("Weather fetch failed. Keeping previous data (if any). Retrying in 1 minute.")
-                        # Schedule retry in 60 seconds by manipulating last_weather_check
-                        # We want (now - last) to be (INTERVAL - 60), so we wait 60s to reach INTERVAL
+                        print("Weather fetch failed. Retrying in 1 minute.")
                         last_weather_check = time.time() - config.WEATHER_UPDATE_INTERVAL_SECONDS + 60
                 
                 # --- Stale Data Calculation ---
@@ -233,10 +237,7 @@ def main():
                 stale_age_str = ""
                 
                 if current_weather:
-                    # Calculate how old the data actually is based on its internal timestamp
                     data_age = time.time() - current_weather.get('timestamp', time.time())
-                    
-                    # Consider data stale if it's older than the interval + small buffer
                     if data_age > (config.WEATHER_UPDATE_INTERVAL_SECONDS + 60):
                         is_stale = True
                         stale_age_str = format_time_diff(data_age)
@@ -246,16 +247,10 @@ def main():
                 time_string = now.strftime("%H:%M")
                 
                 if time_string == previous_time_string and previous_image is not None:
-                    # If time hasn't changed, we usually sleep. 
-                    # BUT if weather just went stale or updated, we need to redraw.
-                    # For simplicity, we redraw if weather changed or time changed.
-                    # Checking deeper logic is complex, so strict 1-min sleep is fine for clock
-                    # but might miss immediate weather updates.
-                    # Current logic: Redraw on time change.
                     time.sleep(1)
                     continue
                 
-                date_string = now.strftime("%a, %b %d")
+                date_string = now.strftime("%a, %b %d %Y")
                 
                 new_image = ui_generator.create_ui_image(
                     time_string, 

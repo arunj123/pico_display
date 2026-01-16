@@ -134,7 +134,8 @@ void MediaApplication::setup() {
 
     m_poll_timer.context = this;
     btstack_run_loop_set_timer_handler(&m_poll_timer, &MediaApplication::poll_handler_forwarder);
-    btstack_run_loop_set_timer(&m_poll_timer, 10);
+    // Poll every 1ms for better responsiveness of UDP discovery when idle
+    btstack_run_loop_set_timer(&m_poll_timer, 1);
     btstack_run_loop_add_timer(&m_poll_timer);
 
     // --- STAGE 3: WI-FI CONNECTION ---
@@ -193,11 +194,14 @@ void MediaApplication::poll_handler() {
         int link_status = cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA);
 
         if (link_status == CYW43_LINK_UP) {
+            // Ensure Discovery Server is running if Wi-Fi is UP, independent of TCP state
+            DiscoveryServer::getInstance().init();
+
             if (!m_tcp_server_active) {
                 printf("Wi-Fi UP. Starting Services...\n");
                 if (m_tcp_server.init(4242)) {
                     m_tcp_server_active = true;
-                    DiscoveryServer::getInstance().init();
+                    // Discovery init is also safe here, but handled above
                     
                     // Show IP again if we reconnected
                     char ip_str[20];
@@ -254,7 +258,8 @@ void MediaApplication::poll_handler() {
             m_drawing.drawImageAsync(tile_header.x, tile_header.y, tile_header.width, tile_header.height, pixel_data);
         }
     }
-    btstack_run_loop_set_timer(&m_poll_timer, 10);
+    // Updated: Poll more frequently (1ms) to ensure UDP discovery responsiveness
+    btstack_run_loop_set_timer(&m_poll_timer, 1);
     btstack_run_loop_add_timer(&m_poll_timer);
 }
 

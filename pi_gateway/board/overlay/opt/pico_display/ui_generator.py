@@ -100,7 +100,6 @@ def create_ui_image(time_str: str, date_str: str, weather_info: dict | None, is_
     secondary_color = config.COLOR_STALE if is_stale else theme["text_secondary"]
     
     # --- Define Layout Zones ---
-    # Moved separator down to 160 to give top section more room
     separator_y = 160 
     
     # --- Visual Separator ---
@@ -116,27 +115,31 @@ def create_ui_image(time_str: str, date_str: str, weather_info: dict | None, is_
     
     right_center_x = 240
     
-    # --- Top-Left: Time and Date (Always Valid) ---
+    # --- Top-Left: Time, Date, and Location ---
+    # Time
     draw.text((left_center_x, 65), time_str, font=config.FONT_TIME, fill=theme["text_primary"], anchor="ms")
+    # Date (With Year now, from display_manager)
     draw.text((left_center_x, 110), date_str, font=config.FONT_DATE, fill=theme["text_secondary"], anchor="ms")
+    
+    # Location
+    # Positioned at 138 (between date 110 and separator 160)
+    draw.text((left_center_x, 142), config.LOCATION_NAME, font=config.FONT_LOCATION, fill=theme["text_secondary"], anchor="ms")
+
 
     # --- Top-Right: Weather ---
     if weather_info:
         icon_size = (90, 70)
         icon_img = _create_weather_icon(weather_info['icon'], icon_size, is_stale)
-        # Shifted icon up slightly due to new top_center_y
         image.paste(icon_img, (right_center_x - icon_size[0] // 2, top_center_y - 80), icon_img)
         
         temp_text = f"{weather_info['temperature']}°C"
         desc_text = weather_info['description']
         
-        # Compacted vertical spacing slightly
         draw.text((right_center_x, top_center_y + 25), temp_text, font=config.FONT_TEMP, fill=primary_color, anchor="ms")
         draw.text((right_center_x, top_center_y + 50), desc_text, font=config.FONT_WEATHER, fill=secondary_color, anchor="ms")
 
         # --- Show Data Age if Stale ---
         if is_stale and stale_age_str:
-             # Moved to +70 to fit above separator (160)
              draw.text((right_center_x, top_center_y + 70), f"Updated {stale_age_str} ago", font=config.FONT_DATA_AGE, fill=config.COLOR_STALE, anchor="ms")
 
     else:

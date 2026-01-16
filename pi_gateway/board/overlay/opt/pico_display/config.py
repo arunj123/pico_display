@@ -6,7 +6,7 @@ from datetime import datetime
 from random import randrange
 
 # -- Device & Network Configuration --
-PICO_IP = "192.168.0.122"
+PICO_IP = None  # Removed hardcoded IP. Discovery is now required.
 PICO_PORT = 4242
 
 # -- Display & Protocol Configuration --
@@ -26,6 +26,7 @@ IMAGE_TILE_HEADER_SIZE = struct.calcsize(IMAGE_TILE_HEADER_FORMAT)
 MAX_PIXEL_DATA_SIZE = TILE_PAYLOAD_SIZE - IMAGE_TILE_HEADER_SIZE
 
 # -- Location & Weather --
+LOCATION_NAME = "Hasenbuck" # Updated location name
 LOCATION_LAT = 49.4247
 LOCATION_LON = 11.0896
 WEATHER_UPDATE_INTERVAL_SECONDS = 15 * 60
@@ -42,8 +43,9 @@ try:
     FONT_WEATHER = ImageFont.truetype(FONT_PATH_REGULAR, 20)
     FONT_INFO_HEADER = ImageFont.truetype(FONT_PATH_REGULAR, 16)
     FONT_INFO_VALUE = ImageFont.truetype(FONT_PATH_BOLD, 18)
-    # Increased size from 12 to 14 for better visibility
-    FONT_DATA_AGE = ImageFont.truetype(FONT_PATH_REGULAR, 14) 
+    FONT_DATA_AGE = ImageFont.truetype(FONT_PATH_REGULAR, 14)
+    # Reuse Weather font for Location
+    FONT_LOCATION = ImageFont.truetype(FONT_PATH_REGULAR, 20) 
 except IOError:
     print("Warning: Custom fonts not found. Using default.")
     FONT_TIME = ImageFont.load_default()
@@ -53,9 +55,9 @@ except IOError:
     FONT_INFO_HEADER = ImageFont.load_default()
     FONT_INFO_VALUE = ImageFont.load_default()
     FONT_DATA_AGE = ImageFont.load_default()
+    FONT_LOCATION = ImageFont.load_default()
 
 # -- UI Color Theme --
-# Brightened from (160, 160, 160) to (200, 200, 200) for better contrast
 COLOR_STALE = (200, 200, 200) 
 
 def get_current_theme():
