@@ -105,3 +105,58 @@ BTstack does not easily support dynamic service changing at runtime. The reboot 
 ### 5.3. Flash Persistence
 * **Location:** Credentials are stored in the **second-to-last sector** of the 2MB Flash (`PICO_FLASH_SIZE_BYTES - (4 * FLASH_SECTOR_SIZE)`). This avoids conflict with the Program Binary (start of flash) and the BTstack NVM (end of flash).
 * **Safety:** The `WifiConfig` class disables interrupts on the core before performing the erase/program sequence to prevent XIP (Execute In Place) crashes during flash writes.
+
+### 5.4. Network Discovery (UDP)
+To eliminate hardcoded IP addresses, the firmware implements a simple UDP discovery service:
+*   **Mechanism:** Listens on UDP Port `4243`.
+*   **Packet:** When it receives the payload `PICO_DISCOVER`, it responds with `PICO_HERE` to the sender.
+*   **Host Logic:** The Python host broadcasts `PICO_DISCOVER` to the subnet and uses the source IP of the first `PICO_HERE` response as the target.
+
+---
+
+## 6. Buildroot Development Helpers
+
+These commands are useful for debugging and developing the custom Buildroot image (`pi_gateway`).
+
+### 6.1. Menuconfig & Busybox
+To customize the general build or the Busybox configuration:
+```bash
+# General Buildroot Config
+make -C buildroot O=$(pwd)/output menuconfig
+make -C buildroot O=$(pwd)/output savedefconfig
+
+# Busybox Config
+make -C buildroot O=$(pwd)/output busybox-menuconfig
+# Save back to the overlay
+cp ./output/build/busybox-*/.config ./pi_gateway/board/busybox.config
+```
+
+### 6.2. Inspecting Image Partitions
+To inspect the contents of the generated images without flashing:
+```bash
+# Check content of data partition (FAT)
+./output/host/bin/mdir -i output/images/data.vfat ::/
+
+# Check content of root partition (SquashFS)
+unsquashfs -ll output/images/rootfs.squashfs | grep "seedrng"
+unsquashfs output/images/rootfs.squashfs etc/inittab
+```
+
+### 6.3. Kernel & Firmware Rebuilds
+To iterate on the Linux kernel or firmware packages without a full rebuild:
+```bash
+# Kernel Customization
+make -C buildroot O=$(pwd)/output linux-menuconfig
+make -C buildroot O=$(pwd)/output linux-savedefconfig
+mv output/build/linux-custom/defconfig pi_gateway/board/linux_kconfig
+
+# Force Rebuild of Kernel
+make -C buildroot O=$(pwd)/output linux-dirclean
+make -C buildroot O=$(pwd)/output linux-reinstall
+
+# Rebuild Firmware Packages
+# Note: These aliases might not exist in your shell; use the full make command if needed.
+# rpi-wifi-firmware-rebuild
+# linux-firmware-rebuild
+make -C buildroot O=$(pwd)/output rpi-firmware-rebuild
+```

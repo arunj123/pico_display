@@ -23,7 +23,7 @@ No need to recompile to change Wi-Fi networks!
 * **Web Bluetooth:** Uses the browser's Bluetooth API to connect securely to the Pico.
 * **Flash Persistence:** Saves SSID and Password to the Pico's onboard Flash memory.
 
-### 3. Host Weather Application (`scripts/display_manager.py`)
+### 3. Host Weather Application (`pi_gateway/board/overlay/opt/pico_display/display_manager.py`)
 A Python application running on your PC/Mac/Raspberry Pi:
 * **Live Data:** Fetches real-time weather from the Open-Meteo API.
 * **Dynamic UI:** Generates a beautiful gradient background that changes based on the time of day (Morning/Day/Sunset/Night).
@@ -74,13 +74,10 @@ You do **not** need to edit header files to set up Wi-Fi.
 6.  The device will automatically save and reboot into Normal Mode.
 
 ### 2. Host Settings (Python)
-After the Pico connects to Wi-Fi, it will display its IP address.
-1.  Open `scripts/config.py`.
-2.  Update the target IP:
-    ```python
-    PICO_IP = "192.168.1.XXX" # Replace with your Pico's IP
-    ```
-3.  (Optional) Update `LOCATION_LAT` and `LOCATION_LON` for accurate weather.
+The host application uses **UDP Auto-Discovery** to find the Pico W.
+1.  Navigate to `pi_gateway/board/overlay/opt/pico_display/`.
+2.  Edit `config.py` to set your Location (Latitude/Longitude).
+3.  (Optional) You can manually set `PICO_IP` if discovery fails.
 
 ---
 
@@ -140,39 +137,49 @@ If OpenOCD fails with `unable to find a matching CMSIS-DAP device` or `could not
 
 ## Hosting python script using Buildroot cooked IOT image
 
-make -C buildroot O=$(pwd)/output menuconfig
-make -C buildroot O=$(pwd)/output savedefconfig
+### 1. Build the Image
+The project includes a helper script to automate the Buildroot setup and compilation:
 
+```bash
 ./scripts/build_pi_image.sh
+```
 
-make -C buildroot O=$(pwd)/output busybox-menuconfig
-cp ./output/build/busybox-*/.config ./pi_gateway/board/busybox.config
+This script will:
+1.  Clone the required Buildroot branch (if missing).
+2.  Configure it using the custom `raspberrypizero2w_64` defconfig.
+3.  Build the system image.
 
-To check content of data partition
-./output/host/bin/mdir -i output/images/data.vfat ::/
+**Output:** `output/images/sdcard.img`
 
-To check content of root partition
-unsquashfs -ll output/images/rootfs.squashfs | grep "seedrng"
-unsquashfs output/images/rootfs.squashfs etc/inittab
+### 2. Flash & Wi-Fi Setup
+1.  Flash `output/images/sdcard.img` to an SD card (using Raspberry Pi Imager, Etcher, or `dd`).
+2.  To configure Wi-Fi, mount the SD card (or connect the Pi Zero 2W via USB if configured as a gadget).
+3.  Create or edit `wifi.conf` on the boot partition:
+    ```text
+    country=DE
+    update_config=1
 
+    network={
+        ssid="your_ssid"
+        psk="your_password"
+        key_mgmt=WPA-PSK
+    }
+    ```
 
-make -C buildroot O=$(pwd)/output linux-menuconfig
-make -C buildroot O=$(pwd)/output linux-savedefconfig
-mv output/build/linux-custom/defconfig pi_gateway/board/linux_kconfig
-make -C buildroot O=$(pwd)/output linux-dirclean
-make -C buildroot O=$(pwd)/output linux-reinstall
-rpi-wifi-firmware-rebuild
-linux-firmware-rebuild
-make -C buildroot O=$(pwd)/output rpi-firmware-rebuild
+### 3. Application Configuration (Autodiscovery)
+The Python host application (`display_manager.py`) is installed to `/opt/pico_display/`.
 
-To configure Wifi, connect Raspberry Pi Zero 2W device to PC, a device will appear. Create/updat wifi.conf.
-'''
-country=DE
-update_config=1
+*   **Autodiscovery:** The application automatically finds the Pico W via UDP broadcast (`PICO_DISCOVER`). You do **not** need to set the IP manually in `config.py` unless discovery fails.
+*   **Location & Settings:** To change weather location or manual IP, edit `/opt/pico_display/config.py` on the device (or `pi_gateway/board/overlay/opt/pico_display/config.py` before building).
 
-network={
-    ssid="DEFAULT_WIFI_SSID"
-    psk="DEFAULT_WIFI_PASSWORD"
-    key_mgmt=WPA-PSK
-}
-'''
+    ```python
+    # pi_gateway/board/overlay/opt/pico_display/config.py
+    
+    # Network
+    PICO_IP = None  # None = Auto-discover
+    
+    # Location
+    LOCATION_NAME = "Nuremberg"
+    LOCATION_LAT = 49.45
+    LOCATION_LON = 11.08
+    ```
