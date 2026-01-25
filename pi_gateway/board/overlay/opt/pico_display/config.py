@@ -1,5 +1,6 @@
 # File: config.py
 import os
+import json
 from PIL import ImageFont
 import struct
 from datetime import datetime
@@ -26,10 +27,23 @@ IMAGE_TILE_HEADER_SIZE = struct.calcsize(IMAGE_TILE_HEADER_FORMAT)
 MAX_PIXEL_DATA_SIZE = TILE_PAYLOAD_SIZE - IMAGE_TILE_HEADER_SIZE
 
 # -- Location & Weather --
-LOCATION_NAME = "Hasenbuck" # Updated location name
+LOCATION_NAME = "Hasenbuck" # Default
 LOCATION_LAT = 49.4247
 LOCATION_LON = 11.0896
 WEATHER_UPDATE_INTERVAL_SECONDS = 15 * 60
+
+# --- Load Dynamic Config ---
+CONFIG_JSON_PATH = "/mnt/data/config.json"
+if os.path.exists(CONFIG_JSON_PATH):
+    try:
+        with open(CONFIG_JSON_PATH, 'r') as f:
+            data = json.load(f)
+            LOCATION_NAME = data.get('name', LOCATION_NAME)
+            LOCATION_LAT = data.get('lat', LOCATION_LAT)
+            LOCATION_LON = data.get('lon', LOCATION_LON)
+            print(f"Loaded config from {CONFIG_JSON_PATH}: {LOCATION_NAME}")
+    except Exception as e:
+        print(f"Error loading {CONFIG_JSON_PATH}: {e}")
 
 # -- UI Layout and Fonts --
 try:

@@ -1,1 +1,1 @@
-# Content can be empty
+source "$BR2_EXTERNAL_IOT_GATEWAY_PATH/package/ble_daemon/Config.in"

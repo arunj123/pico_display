@@ -6,6 +6,7 @@ arm_64bit=1
 
 # 2. Serial Console (Critical for Zero 2 W)
 dtoverlay=dwc2
+dtoverlay=miniuart-bt
 
 # 3. Boot Files
 start_file=start.elf

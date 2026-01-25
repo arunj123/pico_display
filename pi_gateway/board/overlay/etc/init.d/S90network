@@ -75,12 +75,15 @@ start() {
             if [ -f "$DEFAULT_WIFI" ]; then
                 cp "$DEFAULT_WIFI" "$WIFI_CONF"
             else
-                printf "country=DE\nctrl_interface=/var/run/wpa_supplicant\nupdate_config=1\n\nnetwork={\n\tssid=\"YOUR_SSID\"\n\tpsk=\"YOUR_PASS\"\n\tkey_mgmt=WPA-PSK\n}\n" > $WIFI_CONF
+                printf "country=DE\nupdate_config=1\n\nnetwork={\n\tssid=\"YOUR_SSID\"\n\tpsk=\"YOUR_PASS\"\n\tkey_mgmt=WPA-PSK\n}\n" > $WIFI_CONF
             fi
             
             # Remount RO for safety
             mount -o remount,ro $DATA_DIR
         fi
+        
+        # Signal that provisioning is allowed (S91 will remove if USB takes over)
+        touch /tmp/provisioning_active
     fi
 
     # 3. Handle WiFi
@@ -91,10 +94,19 @@ start() {
     ifconfig wlan0 up
     sleep 2
     
-    # Start RNG service to prevent WPA hangs
-    rngd -r /dev/hwrng
+    # Start RNG service to prevent WPA hangs (only if hwrng exists)
+    if [ -c /dev/hwrng ]; then
+        rngd -r /dev/hwrng || log "Warning: rngd failed to start"
+    else
+        log "Note: /dev/hwrng not found, skipping rngd"
+    fi
 
-    cp $WIFI_CONF /tmp/wifi.conf
+    if [ -f "$WIFI_CONF" ]; then
+        cp $WIFI_CONF /tmp/wifi.conf
+    else
+        log "Warning: wifi.conf not found, creating minimal config"
+        printf "country=DE\nupdate_config=1\n\nnetwork={\n\tssid=\"YOUR_SSID\"\n\tpsk=\"YOUR_PASS\"\n\tkey_mgmt=WPA-PSK\n}\n" > /tmp/wifi.conf
+    fi
 
     # Unmount Data Partition to release lock
     umount /mnt/data 2>/dev/null

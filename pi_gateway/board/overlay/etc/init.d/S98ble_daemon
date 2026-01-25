@@ -1,0 +1,40 @@
+#!/bin/sh
+
+start() {
+    # Check if we are in Local Provisioning Mode
+    if [ -f /tmp/provisioning_active ]; then
+        echo "Initializing Bluetooth..."
+        modprobe bluetooth
+        modprobe hci_uart
+        
+        # UART attachment is mapped to native ble_daemon logic now
+        
+        echo "Starting BLE Daemon..."
+        
+        # Run in background
+        start-stop-daemon -S -b -q -m -p /var/run/ble_daemon.pid --exec /usr/bin/ble_daemon
+    else
+        echo "Skipping BLE Daemon (USB Mass Storage Mode active)"
+    fi
+}
+
+stop() {
+    echo "Stopping BLE Daemon..."
+    start-stop-daemon -K -q -p /var/run/ble_daemon.pid
+}
+
+case "$1" in
+  start)
+    start
+    ;;
+  stop)
+    stop
+    ;;
+  restart|reload)
+    stop
+    start
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart}"
+    exit 1
+esac

@@ -63,23 +63,50 @@ start_gadget() {
     mkdir -p functions/mass_storage.usb0
     echo 1 > functions/mass_storage.usb0/stall
     
-    if [ -b "$DATA_PART" ]; then
-        # LUN 0 is best for Windows visibility
-        echo "$DATA_PART" > functions/mass_storage.usb0/lun.0/file
-        echo 0 > functions/mass_storage.usb0/lun.0/ro
-        
-        # Must be 1 because we are sharing a partition, not a whole disk
-        echo 1 > functions/mass_storage.usb0/lun.0/removable
-        
-        ln -s functions/mass_storage.usb0 configs/c.1/
-        log_msg "Mass Storage linked to $DATA_PART"
-    else
-        log_msg "WARNING: $DATA_PART not found. Skipping Mass Storage."
-    fi
+    # Initialize with EMPTY file -> Safe start
+    echo "" > functions/mass_storage.usb0/lun.0/file
+    echo 0 > functions/mass_storage.usb0/lun.0/ro
+    echo 1 > functions/mass_storage.usb0/lun.0/removable
+    
+    ln -s functions/mass_storage.usb0 configs/c.1/
+    log_msg "Mass Storage function created (Empty)."
 
-    # 6. Enable the Gadget (This triggers the 'configured' state on the PC)
+    # 6. Enable the Gadget (Trigger UDC)
     echo "$UDC_NAME" > UDC
-    log_msg "Gadget Successfully Enabled!"
+    log_msg "Gadget Enabled. Checking Host Connection..."
+    
+    # 7. Smart Switch Logic
+    sleep 2
+    # Check State
+    # We check if the UDC reports 'configured' (Host enumerated us)
+    UDC_STATE=$(cat /sys/class/udc/$UDC_NAME/state 2>/dev/null)
+    log_msg "UDC State: $UDC_STATE"
+    
+    if [ "$UDC_STATE" = "configured" ]; then
+        log_msg "Host DETECTED. Switching to Mass Storage Mode."
+        
+        # Unmount local usage
+        umount /mnt/data 2>/dev/null
+        
+        # Remove provisioning flag so S99pico_provisioner knows to skip (if it restarts)
+        # Note: S99 might have already started?
+        # If S99 started, it's holding the file handle?
+        # pico_provisioner opens /mnt/data/wifi.conf only when writing?
+        # It opens /tmp/...
+        # But we should stop the provisioner if it uses the partition?
+        # Actually, pico_provisioner itself doesn't lock the partition unless writing.
+        # But for safety, we assume if USB is connected, we give it to USB.
+        rm -f /tmp/provisioning_active
+        
+        if [ -b "$DATA_PART" ]; then
+            echo "$DATA_PART" > functions/mass_storage.usb0/lun.0/file
+            log_msg "Mass Storage LUN mapped to $DATA_PART"
+        fi
+    else
+        log_msg "No Host or Power Only. Keeping Local Mode."
+        # Mass Storage remains empty ("No Media")
+        mount /dev/mmcblk0p3 /mnt/data || true
+    fi
 }
 
 case "$1" in

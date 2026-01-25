@@ -154,7 +154,7 @@ This script will:
 ### 2. Flash & Wi-Fi Setup
 1.  Flash `output/images/sdcard.img` to an SD card (using Raspberry Pi Imager, Etcher, or `dd`).
 2.  To configure Wi-Fi, mount the SD card (or connect the Pi Zero 2W via USB if configured as a gadget).
-3.  Create or edit `wifi.conf` on the boot partition:
+3.  Create or edit `wifi.conf` on the **Data Partition** (which appears as a USB Drive when connected to PC):
     ```text
     country=DE
     update_config=1
@@ -170,16 +170,40 @@ This script will:
 The Python host application (`display_manager.py`) is installed to `/opt/pico_display/`.
 
 *   **Autodiscovery:** The application automatically finds the Pico W via UDP broadcast (`PICO_DISCOVER`). You do **not** need to set the IP manually in `config.py` unless discovery fails.
-*   **Location & Settings:** To change weather location or manual IP, edit `/opt/pico_display/config.py` on the device (or `pi_gateway/board/overlay/opt/pico_display/config.py` before building).
-
-    ```python
-    # pi_gateway/board/overlay/opt/pico_display/config.py
-    
-    # Network
-    PICO_IP = None  # None = Auto-discover
-    
-    # Location
-    LOCATION_NAME = "Nuremberg"
-    LOCATION_LAT = 49.45
-    LOCATION_LON = 11.08
+*   **Location & Settings:** 
+    *   **BLE Method:** Use the "Gateway Setup" Web Interface (connected via Bluetooth) to set location. This saves to `config.json`.
+    *   **Manual Method:** Edit `config.json` on the USB Data Partition:
+    ```json
+    {
+        "name": "Nuremberg",
+        "lat": 49.45,
+        "lon": 11.08
+    }
     ```
+
+## New Features (v2.0)
+
+### 1. Smart USB Storage & Console
+The device now intelligently manages the USB connection:
+- **PC Connection**: When connected to a computer, it exposes:
+    - **USB Mass Storage**: The Data Partition (`/dev/mmcblk0p3`) appears as a USB Drive. You can edit `wifi.conf` or `config.json` directly.
+    - **Serial Console**: A shell is available on `ttyGS0` (accessible via `screen /dev/ttyACM0 115200` on host).
+    - **Note**: In this mode, local access to the data partition is disabled to prevent corruption.
+- **Power-Only / Wall Adapter**: 
+    - Mass Storage is disabled (shows "No Media").
+    - **Local Provisioning**: The Data Partition is mounted to `/mnt/data`. The system is ready for BLE provisioning.
+
+### 2. Partition Layout
+- **Boot (`/boot`)**: Read-only system boot files. Now also stores `seedrng` entropy for reliable random number generation across reboots.
+- **RootFS**: Read-only SquashFS.
+- **Data (`/mnt/data`)**: Read-Write vFAT partition. Stores:
+    - `wifi.conf`: WPA Supplicant configuration.
+    - `config.json`: Location and Settings.
+
+### 3. BLE Provisioning
+- **Device Name**: "Gateway Setup"
+- **Service UUID**: `0xFF00`
+- **Characteristics**:
+    - `0xFF01` (Write): WiFi Credentials
+    - `0xFF02` (Write): Location Data
+- **Pairing**: Just Works (Auto-confirm)
