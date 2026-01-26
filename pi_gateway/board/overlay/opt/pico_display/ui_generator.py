@@ -134,14 +134,14 @@ def create_ui_image(time_str: str, date_str: str, weather_info: dict | None, is_
     
     # Bottom Zone
     cols = 4; col_w = config.LCD_WIDTH / cols
-    labels = ["WIND", "HUMIDITY", "SUNRISE", "SUNSET"]
+    labels = ["Wind", "Humidity", "Sunrise", "Sunset"]
     keys = ["windspeed", "humidity", "sunrise", "sunset"]
     for i in range(cols):
-        cx = int(col_w * (i + 0.5)); y = 180
+        cx = int(col_w * (i + 0.5)); y = 172
         icon = _draw_info_icon(keys[i].split('speed')[0], (22, 22), secondary_color)
         image.paste(icon, (cx-11, y), icon)
-        draw.text((cx, y+35), labels[i], font=config.FONT_INFO_HEADER, fill=secondary_color, anchor="ms")
+        draw.text((cx, y+37), labels[i], font=config.FONT_INFO_HEADER, fill=secondary_color, anchor="ms")
         val = f"{weather_info[keys[i]]}{' km/h' if i==0 else '%' if i==1 else ''}" if weather_info else "..."
-        draw.text((cx, y+55), val, font=config.FONT_INFO_VALUE, fill=primary_color, anchor="ms")
+        draw.text((cx, y+57), val, font=config.FONT_INFO_VALUE, fill=primary_color, anchor="ms")
 
     return image.convert('RGB')
