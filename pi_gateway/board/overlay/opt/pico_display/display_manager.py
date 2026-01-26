@@ -1,14 +1,68 @@
-# File: display_manager.py
 import socket
 import time
 import struct
 import zlib
+import threading
+import json
 from datetime import datetime
 from PIL import Image, ImageChops
 import os
 import config
 import weather
 import ui_generator
+
+# Global sensor data storage
+sensor_data = {}
+sensor_data_lock = threading.Lock()
+
+def uds_listener_thread():
+    """Listens for sensor updates from ble_daemon over UDS."""
+    global sensor_data
+    socket_path = "/tmp/ble_sensor_data.sock"
+    
+    while True:
+        if not os.path.exists(socket_path):
+            time.sleep(2)
+            continue
+            
+        try:
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            client.connect(socket_path)
+            print(f"[UDS] Connected to {socket_path}")
+            
+            buffer = ""
+            while True:
+                data = client.recv(1024).decode('utf-8')
+                if not data: break
+                
+                buffer += data
+                while "\n" in buffer:
+                    line, buffer = buffer.split("\n", 1)
+                    try:
+                        msg = json.loads(line)
+                        if msg.get('type') == 'sensor':
+                            name = msg.get('name').strip()
+                            # The C++ daemon uses 5-char space padding (e.g. "Wohn ").
+                            # We'll normalize to a clean name for internal storage.
+                            msg_ts = msg.get('ts')
+                            with sensor_data_lock:
+                                sensor_data[name] = {
+                                    'temp': msg.get('temp'),
+                                    'hum': msg.get('hum'),
+                                    'rssi': msg.get('rssi'),
+                                    'timestamp': msg_ts if msg_ts else time.time()
+                                }
+                    except json.JSONDecodeError:
+                        continue
+        except Exception as e:
+            print(f"[UDS] Connection error: {e}")
+            time.sleep(5)
+        finally:
+            try: client.close()
+            except: pass
+
+# Start UDS listener thread
+threading.Thread(target=uds_listener_thread, daemon=True).start()
 
 class DeviceManager:
     """Manages robust, fire-and-forget TCP communication with the Pico W device."""
@@ -214,17 +268,16 @@ def main():
             
             previous_image = None
 
+            last_screen_switch = time.time()
+            current_screen = "weather" # or "sensors"
+
             while True:
                 # --- Weather Update Logic ---
-                # Check weather if interval passed OR if we never had weather data (force update)
                 time_since_last = time.time() - last_weather_check
-                
                 if force_update or time_since_last > config.WEATHER_UPDATE_INTERVAL_SECONDS:
                     print("Fetching weather data...")
                     force_update = False 
-                    
                     new_weather = weather.get_weather(config.LOCATION_LAT, config.LOCATION_LON)
-                    
                     if new_weather:
                         current_weather = new_weather
                         last_weather_check = time.time()
@@ -232,34 +285,48 @@ def main():
                         print("Weather fetch failed. Retrying in 1 minute.")
                         last_weather_check = time.time() - config.WEATHER_UPDATE_INTERVAL_SECONDS + 60
                 
-                # --- Stale Data Calculation ---
-                is_stale = False
-                stale_age_str = ""
-                
-                if current_weather:
-                    data_age = time.time() - current_weather.get('timestamp', time.time())
-                    if data_age > (config.WEATHER_UPDATE_INTERVAL_SECONDS + 60):
-                        is_stale = True
-                        stale_age_str = format_time_diff(data_age)
+                # --- Screen Switch Logic ---
+                now_ts = time.time()
+                if current_screen == "weather" and (now_ts - last_screen_switch) > 10:
+                    current_screen = "sensors"
+                    last_screen_switch = now_ts
+                elif current_screen == "sensors" and (now_ts - last_screen_switch) > 5:
+                    current_screen = "weather"
+                    last_screen_switch = now_ts
 
                 # --- UI Rendering ---
                 now = datetime.now()
                 time_string = now.strftime("%H:%M")
                 
-                if time_string == previous_time_string and previous_image is not None:
-                    time.sleep(1)
-                    continue
-                
-                date_string = now.strftime("%a, %b %d %Y")
-                
-                new_image = ui_generator.create_ui_image(
-                    time_string, 
-                    date_string, 
-                    current_weather,
-                    is_stale=is_stale,
-                    stale_age_str=stale_age_str
-                )
+                # We need to update if time changes OR if screen changes OR (if sensors) every few seconds to show "last seen" updates
+                if current_screen == "weather":
+                    if time_string == previous_time_string and previous_image is not None and not force_update:
+                        time.sleep(0.5)
+                        continue
+                    
+                    date_string = now.strftime("%a, %b %d %Y")
+                    is_stale = False
+                    stale_age_str = ""
+                    if current_weather:
+                        data_age = time.time() - current_weather.get('timestamp', time.time())
+                        if data_age > (config.WEATHER_UPDATE_INTERVAL_SECONDS + 60):
+                            is_stale = True
+                            stale_age_str = format_time_diff(data_age)
 
+                    new_image = ui_generator.create_ui_image(
+                        time_string, 
+                        date_string, 
+                        current_weather,
+                        is_stale=is_stale,
+                        stale_age_str=stale_age_str
+                    )
+                else: # sensors screen
+                    with sensor_data_lock:
+                        # Copy data to avoid long lock
+                        current_sensors = sensor_data.copy()
+                    
+                    new_image = ui_generator.create_sensor_ui_image(current_sensors)
+                
                 new_image_binary = ui_generator.convert_image_to_rgb565(new_image)
                 quantized_new_image = ui_generator.reconstruct_image_from_rgb565(new_image_binary, new_image.width, new_image.height)
                 
@@ -267,10 +334,10 @@ def main():
                 
                 if success:
                     previous_image = resulting_image
-                    previous_time_string = time_string
+                    previous_time_string = time_string if current_screen == "weather" else ""
                     if previous_image:
                         previous_image.save(config.STATE_IMAGE_PATH)
-                        print(f"Successfully updated display. State saved to {config.STATE_IMAGE_PATH}")
+                        # print(f"Successfully updated display ({current_screen}).")
                 else:
                     break
                 
