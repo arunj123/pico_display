@@ -102,9 +102,18 @@ BTstack does not easily support dynamic service changing at runtime. The reboot 
 * **Setup Mode:** Uses `setup_mode.gatt`. Advertises as "Pico Setup". Contains a custom Write-only characteristic for receiving "SSID:Password" strings.
 * **Normal Mode:** Uses `media_controller.gatt`. Advertises as "Pico MediaCtl". Contains HID Service and Battery Service.
 
-### 5.3. Flash Persistence
-* **Location:** Credentials are stored in the **second-to-last sector** of the 2MB Flash (`PICO_FLASH_SIZE_BYTES - (4 * FLASH_SECTOR_SIZE)`). This avoids conflict with the Program Binary (start of flash) and the BTstack NVM (end of flash).
-* **Safety:** The `WifiConfig` class disables interrupts on the core before performing the erase/program sequence to prevent XIP (Execute In Place) crashes during flash writes.
+### 5.3. File-Based Persistence & Init Strategy
+To avoid conflicts between the Python script (Reader), the BLE Daemon (Writer), and the USB Mass Storage (External Writer), we implemented a strict "Init Copy" strategy:
+1.  **Boot Phase (`S90network`):**
+    *   The init script mounts the Data Partition (`/mnt/data`).
+    *   It checks for `config.json`. If missing, it creates a default.
+    *   **Crucially**, it copies `/mnt/data/config.json` to `/tmp/config.json` (RAM).
+2.  **Runtime Phase:**
+    *   **Python Script:** Reads configuration *only* from `/tmp/config.json`. This ensures it never holds a lock on the persistent storage, preventing corruption if the user mounts the device via USB.
+    *   **BLE Daemon:** Writes updates (Wi-Fi/Location) directly to `/mnt/data/config.json` and triggers a reboot.
+3.  **Write Buffering:**
+    *   Large JSON payloads from the Web Client (e.g., Location Data) are often fragmented by the BLE MTU (23 bytes).
+    *   The Daemon implements a `write_buffer_` that accumulates incoming chunks until a complete JSON object is detected (matching `{` and `}`), ensuring valid data is always stored.
 
 ### 5.4. Network Discovery (UDP)
 To eliminate hardcoded IP addresses, the firmware implements a simple UDP discovery service:
@@ -114,11 +123,40 @@ To eliminate hardcoded IP addresses, the firmware implements a simple UDP discov
 
 ---
 
-## 6. Buildroot Development Helpers
+## 6. Pi Gateway BLE Daemon (Linux C++)
+
+The Pi Gateway (Pi Zero 2W) runs a custom C++ daemon (`ble_daemon`) instead of using the standard BlueZ D-Bus API. This decision was made to ensure 100% control over the BLE Advertise/Connect flow, which is notoriously flaky on Linux when using standard APIs for "Peripheral Mode".
+
+### 6.1. Direct HCI Access (`HCI_CHANNEL_USER`)
+*   **Problem:** The Linux Kernel BlueZ stack often interferes with custom advertisements, forcing its own GAP settings or rejecting iOS/Windows connection attempts due to authentication timeout mismatches.
+*   **Solution:** The daemon binds to the Bluetooth Controller using `HCI_CHANNEL_USER`. This gives it **exclusive** raw access to the Host Controller Interface (HCI). The kernel stack is completely bypassed.
+*   **Impact:** The daemon manually constructs every HCI Command (Advertising Enable, Set Data, Connection Update Reply) and parses every raw HCI Event (Connection Complete, Disconnect).
+
+### 6.2. Modular Architecture
+The daemon is structured around a central `HCIController`:
+*   **`HCIController`**: Manages the socket, event loop (`poll`), and dispatches HCI events to registered modules.
+*   **`ProvisioningModule`**: A self-contained class that implements the "Gateway Setup" GATT server. It:
+    *   Manages the GATT Database (Attributes, UUIDs).
+    *   Parses L2CAP/ATT packets directly.
+    *   Handles the `write_buffer_` for reassembling fragmented JSON.
+    *   Executes the File I/O logic for `config.json`.
+
+### 6.3. Write Buffering & Partial Save
+To handle large Location JSON objects (which exceed the 23-byte BLE MTU):
+1.  **Buffering:** The `ProvisioningModule` maintains a `std::string write_buffer_`.
+2.  **Detection:** When a write to Handle `0x0034` (Location) occurs:
+    *   If it starts with `{`, buffer is cleared and content added.
+    *   If it doesn't start with `{`, content is appended.
+    *   The buffer is checked for a closing `}`.
+3.  **Completion:** Only when a complete JSON object is detected is the file written to disk. This prevents partial writes from corrupting the configuration.
+
+---
+
+## 7. Buildroot Development Helpers
 
 These commands are useful for debugging and developing the custom Buildroot image (`pi_gateway`).
 
-### 6.1. Menuconfig & Busybox
+### 7.1. Menuconfig & Busybox
 To customize the general build or the Busybox configuration:
 ```bash
 # General Buildroot Config
@@ -131,7 +169,7 @@ make -C buildroot O=$(pwd)/output busybox-menuconfig
 cp ./output/build/busybox-*/.config ./pi_gateway/board/busybox.config
 ```
 
-### 6.2. Inspecting Image Partitions
+### 7.2. Inspecting Image Partitions
 To inspect the contents of the generated images without flashing:
 ```bash
 # Check content of data partition (FAT)
@@ -142,7 +180,7 @@ unsquashfs -ll output/images/rootfs.squashfs | grep "seedrng"
 unsquashfs output/images/rootfs.squashfs etc/inittab
 ```
 
-### 6.3. Kernel & Firmware Rebuilds
+### 7.3. Kernel & Firmware Rebuilds
 To iterate on the Linux kernel or firmware packages without a full rebuild:
 ```bash
 # Kernel Customization

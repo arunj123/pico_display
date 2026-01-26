@@ -5,177 +5,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pico W Setup</title>
-    <style>
-        :root {
-            --primary: #007bff;
-            --success: #28a745;
-            --danger: #dc3545;
-            --bg: #f4f6f8;
-            --card: #ffffff;
-            --text: #333333;
-            --text-sub: #666666;
-        }
+    <link rel="stylesheet" href="style.css">
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--bg);
-            color: var(--text);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            margin: 0;
-            padding: 20px;
-        }
-
-        .container {
-            background: var(--card);
-            padding: 2.5rem;
-            border-radius: 16px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
-            width: 100%;
-            max-width: 360px;
-            text-align: center;
-            transition: transform 0.2s;
-        }
-
-        h1 {
-            margin: 0 0 10px;
-            font-size: 24px;
-            color: var(--text);
-        }
-
-        p {
-            margin: 0 0 25px;
-            color: var(--text-sub);
-            font-size: 15px;
-            line-height: 1.5;
-        }
-
-        .status-badge {
-            display: inline-block;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 13px;
-            font-weight: 600;
-            margin-bottom: 20px;
-            background-color: #e9ecef;
-            color: var(--text-sub);
-        }
-
-        .status-badge.connected {
-            background-color: #d4edda;
-            color: #155724;
-        }
-
-        .status-badge.error {
-            background-color: #f8d7da;
-            color: #721c24;
-        }
-
-        input {
-            width: 100%;
-            padding: 12px;
-            margin: 8px 0;
-            border: 2px solid #e9ecef;
-            border-radius: 8px;
-            box-sizing: border-box;
-            font-size: 16px;
-            transition: border-color 0.2s;
-        }
-
-        input:focus {
-            outline: none;
-            border-color: var(--primary);
-        }
-
-        .btn {
-            width: 100%;
-            padding: 14px;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            margin-top: 12px;
-            transition: opacity 0.2s, transform 0.1s;
-        }
-
-        .btn:active {
-            transform: scale(0.98);
-        }
-
-        .btn-primary {
-            background-color: var(--primary);
-            color: white;
-        }
-
-        .btn-danger {
-            background-color: white;
-            color: var(--danger);
-            border: 2px solid var(--danger);
-        }
-
-        .btn-danger:hover {
-            background-color: #fff5f5;
-        }
-
-        .btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-
-        /* Spinner */
-        .spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid var(--primary);
-            border-radius: 50%;
-            width: 20px;
-            height: 20px;
-            animation: spin 1s linear infinite;
-            display: inline-block;
-            margin-bottom: -5px;
-            margin-right: 8px;
-        }
-
-        @keyframes spin {
-            0% {
-                transform: rotate(0deg);
-            }
-
-            100% {
-                transform: rotate(360deg);
-            }
-        }
-
-        /* Log Console */
-        #log-console {
-            margin-top: 20px;
-            width: 100%;
-            max-width: 360px;
-            background: #fff;
-            border: 1px solid #e9ecef;
-            border-radius: 8px;
-            padding: 10px;
-            font-family: monospace;
-            font-size: 11px;
-            height: 150px;
-            overflow-y: auto;
-            text-align: left;
-            word-break: break-all;
-            display: none;
-        }
-
-        .log-entry {
-            margin-bottom: 2px;
-        }
-
-        .log-time {
-            color: #888;
-            margin-right: 5px;
-        }
-    </style>
+    <!-- Leaflet Map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 </head>
 
 <body>
@@ -189,27 +25,40 @@
         <!-- CONNECT SCREEN -->
         <div id="connection-ui">
             <button id="connectBtn" class="btn btn-primary">Connect Device</button>
-            <button id="debugBtn" class="btn btn-danger"
-                style="margin-top: 10px; background-color: #6c757d; border-color: #6c757d; color: white;">Debug Scan
-                (Show All)</button>
         </div>
 
         <!-- FORM SCREEN -->
         <div id="form-ui" class="hidden">
-            <div style="text-align: left; margin-bottom: 5px; font-weight: 600; font-size: 14px; color: var(--text);">
-                Wi-Fi Settings</div>
-            <input type="text" id="ssid" placeholder="Network Name (SSID)" required autocomplete="off">
-            <input type="password" id="password" placeholder="Password" autocomplete="off">
 
-            <div id="location-ui" class="hidden">
-                <div
-                    style="text-align: left; margin: 15px 0 5px; font-weight: 600; font-size: 14px; color: var(--text);">
-                    Location Settings</div>
-                <input type="text" id="loc_name" placeholder="Location Name (e.g. Nuremberg)" autocomplete="off">
-                <div style="display: flex; gap: 10px;">
-                    <input type="number" id="loc_lat" placeholder="Latitude" step="any" autocomplete="off">
-                    <input type="number" id="loc_lon" placeholder="Longitude" step="any" autocomplete="off">
-                </div>
+            <!-- Wi-Fi Section (Hidden by Default) -->
+            <div class="section-header">
+                <span>Wi-Fi Settings</span>
+                <button type="button" id="wifi-toggle" class="sm-btn">Configure Wi-Fi</button>
+            </div>
+
+            <div id="wifi-section" class="hidden">
+                <input type="text" id="ssid" placeholder="Network Name (SSID)" autocomplete="off">
+                <input type="password" id="password" placeholder="Password" autocomplete="off">
+            </div>
+
+            <!-- Location Section -->
+            <div class="section-header">Location Data</div>
+            <input type="text" id="loc_name" placeholder="Display Label (e.g. Living Room)" autocomplete="off">
+            <div style="font-size: 11px; color: #666; text-align: left; margin-bottom: 5px;">
+                Label is optional. Coordinates are auto-filled from map or device.
+            </div>
+
+            <!-- Map UI -->
+            <div id="map"></div>
+            <button type="button" id="geoBtn" class="geo-btn">
+                <span style="font-size:16px">📍</span> Use My Browser Location
+            </button>
+
+            <div style="display: flex; gap: 10px; margin-top: 10px;">
+                <input type="number" id="loc_lat" placeholder="Latitude" step="any" readonly
+                    style="background-color: #f8f9fa; color: #666;">
+                <input type="number" id="loc_lon" placeholder="Longitude" step="any" readonly
+                    style="background-color: #f8f9fa; color: #666;">
             </div>
 
             <button id="saveBtn" class="btn btn-primary">Save & Reboot</button>
@@ -220,232 +69,7 @@
         <div id="log-console"></div>
     </div>
 
-    <script>
-        const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-        const WIFI_CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
-        // Location characteristic is not implemented in C++ currently
-        const LOC_CHAR_UUID = "0000ff02-0000-1000-8000-00805f9b34fb";
-
-        let bluetoothDevice;
-        let wifiCharacteristic;
-        let locationCharacteristic;
-
-        const ui = {
-            connectBtn: document.getElementById('connectBtn'),
-            saveBtn: document.getElementById('saveBtn'),
-            exitBtn: document.getElementById('exitBtn'),
-            status: document.getElementById('status-indicator'),
-            form: document.getElementById('form-ui'),
-            locUI: document.getElementById('location-ui'),
-            connect: document.getElementById('connection-ui'),
-            ssid: document.getElementById('ssid'),
-            pass: document.getElementById('password'),
-            locName: document.getElementById('loc_name'),
-            locLat: document.getElementById('loc_lat'),
-            locLon: document.getElementById('loc_lon'),
-            log: document.getElementById('log-console')
-        };
-
-        function log(msg) {
-            ui.log.style.display = 'block';
-            const time = new Date().toLocaleTimeString();
-            const div = document.createElement('div');
-            div.className = 'log-entry';
-            div.innerHTML = `<span class="log-time">[${time}]</span> ${msg}`;
-            ui.log.appendChild(div);
-            ui.log.scrollTop = ui.log.scrollHeight;
-            console.log(`[BLE Web] ${msg}`);
-        }
-
-        window.onerror = function (msg, url, line) {
-            log(`ERROR: ${msg} (Line ${line})`);
-            return false;
-        };
-
-        function setStatus(msg, type = 'normal') {
-            log(`Status: ${msg} (${type})`);
-            ui.status.textContent = msg;
-            ui.status.className = 'status-badge';
-            if (type === 'success') ui.status.classList.add('connected');
-            if (type === 'error') ui.status.classList.add('error');
-        }
-
-        ui.connectBtn.addEventListener('click', async () => {
-            try {
-                setStatus('Requesting Bluetooth...');
-                log("Executing navigator.bluetooth.requestDevice...");
-                bluetoothDevice = await navigator.bluetooth.requestDevice({
-                    filters: [{ namePrefix: "Pico" }, { namePrefix: "Gateway" }, { namePrefix: "PiZero" }],
-                    optionalServices: [SERVICE_UUID]
-                });
-                log(`Device selected: ${bluetoothDevice.name}`);
-
-                bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
-
-                setStatus('Connecting...');
-                log("GATT: connect() triggered...");
-                const server = await bluetoothDevice.gatt.connect();
-                log("GATT: connected success.");
-
-                setStatus('Locating Service...');
-                log(`GATT: getPrimaryService(${SERVICE_UUID})`);
-                const service = await server.getPrimaryService(SERVICE_UUID);
-                log("GATT: service found.");
-
-                setStatus('Locating Characteristics...');
-                log(`GATT: getCharacteristic(${WIFI_CHAR_UUID})`);
-                wifiCharacteristic = await service.getCharacteristic(WIFI_CHAR_UUID);
-                log("GATT: WiFi characteristic found.");
-
-                try {
-                    log(`GATT: getCharacteristic(${LOC_CHAR_UUID}) [Optional]`);
-                    locationCharacteristic = await service.getCharacteristic(LOC_CHAR_UUID);
-                    log("GATT: Location characteristic found.");
-                    ui.locUI.classList.remove('hidden');
-                } catch (e) {
-                    log(`GATT: Location characteristic info: ${e.message}`);
-                    locationCharacteristic = null;
-                }
-
-                setStatus('Connected', 'success');
-                ui.connect.classList.add('hidden');
-                ui.form.classList.remove('hidden');
-
-            } catch (error) {
-                console.error(error);
-                if (error.name === 'NotFoundError') {
-                    setStatus('Cancelled by user');
-                } else {
-                    setStatus('Connection Failed', 'error');
-                }
-            }
-        });
-
-        document.getElementById('debugBtn').addEventListener('click', async () => {
-            try {
-                setStatus('Scanning ALL devices...');
-                bluetoothDevice = await navigator.bluetooth.requestDevice({
-                    acceptAllDevices: true,
-                    optionalServices: [SERVICE_UUID]
-                });
-
-                bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
-                setStatus('Connecting...');
-                const server = await bluetoothDevice.gatt.connect();
-
-                setStatus('Connected (Debug)', 'success');
-                ui.connect.classList.add('hidden');
-                ui.form.classList.remove('hidden');
-
-                try {
-                    setStatus('Locating Service...');
-                    const service = await server.getPrimaryService(SERVICE_UUID);
-                    wifiCharacteristic = await service.getCharacteristic(WIFI_CHAR_UUID);
-                } catch (e) {
-                    console.log("Service not found in debug mode");
-                    setStatus('Connected but Service Missing? ' + e.message, 'error');
-                }
-
-            } catch (error) {
-                console.error(error);
-                setStatus('Debug Scan Failed: ' + error.message, 'error');
-            }
-        });
-
-        async function sendCommand(char, commandStr) {
-            const enc = new TextEncoder();
-            try {
-                await char.writeValueWithResponse(enc.encode(commandStr));
-                return true;
-            } catch (e) {
-                console.error(e);
-                setStatus('Write Failed: ' + e.message, 'error');
-                return false;
-            }
-        }
-
-        ui.saveBtn.addEventListener('click', async () => {
-            const ssid = ui.ssid.value.trim();
-            const password = ui.pass.value.trim();
-
-            // Location Data
-            const locName = ui.locName.value.trim();
-            const locLat = ui.locLat.value.trim();
-            const locLon = ui.locLon.value.trim();
-
-            if (!ssid) {
-                setStatus('SSID is required', 'error');
-                return;
-            }
-
-            ui.saveBtn.disabled = true;
-            ui.saveBtn.innerHTML = '<div class="spinner"></div> Saving...';
-
-            try {
-                // 1. Send SSID
-                if (!await sendCommand(wifiCharacteristic, "S:" + ssid)) throw new Error("SSID Write Failed");
-                await new Promise(r => setTimeout(r, 50));
-
-                // 2. Send Password (if any)
-                if (password) {
-                    if (!await sendCommand(wifiCharacteristic, "P:" + password)) throw new Error("Pass Write Failed");
-                    await new Promise(r => setTimeout(r, 50));
-                }
-
-                // 3. Send Location (if supported and entered)
-                if (locationCharacteristic && locName) {
-                    const locData = JSON.stringify({
-                        name: locName,
-                        lat: parseFloat(locLat) || 0.0,
-                        lon: parseFloat(locLon) || 0.0
-                    });
-                    if (!await sendCommand(locationCharacteristic, locData)) throw new Error("Location Write Failed");
-                    await new Promise(r => setTimeout(r, 50));
-                }
-
-                // 4. Send Save Command
-                if (!await sendCommand(wifiCharacteristic, "SAVE")) throw new Error("Save Command Failed");
-
-                setStatus('Saved! Device Rebooting...', 'success');
-                setTimeout(() => disconnect(), 2000);
-
-            } catch (error) {
-                ui.saveBtn.disabled = false;
-                ui.saveBtn.textContent = 'Save & Reboot';
-                setStatus(error.message, 'error');
-            }
-        });
-
-        ui.exitBtn.addEventListener('click', async () => {
-            ui.exitBtn.disabled = true;
-            ui.exitBtn.textContent = 'Exiting...';
-            if (await sendCommand(wifiCharacteristic, "EXIT")) {
-                setStatus('Exiting Setup Mode...', 'success');
-                setTimeout(() => disconnect(), 1000);
-            } else {
-                ui.exitBtn.disabled = false;
-                ui.exitBtn.textContent = 'Exit Setup Mode';
-            }
-        });
-
-        function disconnect() {
-            if (bluetoothDevice && bluetoothDevice.gatt.connected) {
-                bluetoothDevice.gatt.disconnect();
-            }
-        }
-
-        function onDisconnected() {
-            setStatus('Disconnected');
-            ui.form.classList.add('hidden');
-            ui.connect.classList.remove('hidden');
-            ui.saveBtn.disabled = false;
-            ui.saveBtn.textContent = 'Save & Reboot';
-            ui.exitBtn.disabled = false;
-            ui.exitBtn.textContent = 'Exit Setup Mode';
-            ui.ssid.value = '';
-            ui.pass.value = '';
-        }
-    </script>
+    <script src="app.js"></script>
 </body>
 
 </html>

@@ -36,165 +36,112 @@ def _draw_background(theme: dict) -> Image.Image:
     draw = ImageDraw.Draw(image)
     r1, g1, b1 = theme["gradient_start"]
     r2, g2, b2 = theme["gradient_end"]
-    for x in range(config.LCD_WIDTH):
-        p = x / float(config.LCD_WIDTH - 1)
+    # Change to Vertical Gradient (Top to Bottom) for more premium feel
+    for y in range(config.LCD_HEIGHT):
+        p = y / float(config.LCD_HEIGHT - 1)
         r,g,b = [int(c1 + (c2-c1)*p) for c1,c2 in zip((r1,g1,b1), (r2,g2,b2))]
-        draw.line([(x, 0), (x, config.LCD_HEIGHT)], fill=(r,g,b))
+        draw.line([(0, y), (config.LCD_WIDTH, y)], fill=(r,g,b))
     return image
 
 def _create_weather_icon(icon_name: str, size: tuple[int, int], is_stale: bool = False) -> Image.Image:
-    # Handle transparency
     icon = Image.new('RGBA', size, (0,0,0,0)); draw = ImageDraw.Draw(icon); w,h=size
-    
-    # Define base colors. If stale, desaturate/dim them.
     if is_stale:
-        C_SUN = (180, 160, 100) # Dim gold
-        C_MOON = (180, 180, 180) # Grey
-        C_CLOUD = (150, 150, 150) # Grey
+        C_MAIN = (180, 180, 180); C_SUN = (180, 160, 100); C_CLOUD = (150, 150, 150)
     else:
-        C_SUN = (255,204,0)
-        C_MOON = (240,240,230)
-        C_CLOUD = (220,220,220)
-        
-    SHADOW = (0,0,0,50)
-    so = (4,4)
-    def ds(o=(0,0),c=C_SUN): ce,r=(w/2+o[0],h/2+o[1]),22;draw.ellipse([(ce[0]-r,ce[1]-r),(ce[0]+r,ce[1]+r)],fill=c);[draw.line([(ce[0]+cos(radians(i*30))*(r+4),ce[1]+sin(radians(i*30))*(r+4)),(ce[0]+cos(radians(i*30))*(r+10),ce[1]+sin(radians(i*30))*(r+10))],fill=c,width=4) for i in range(12)]
-    def dc(o=(0,0),c=C_MOON): cx,cy,r=w/2+o[0],h/2+o[1],22;draw.ellipse([(cx-r,cy-r),(cx+r,cy+r)],fill=c);draw.ellipse([(cx-r+10,cy-r-4),(cx+r+10,cy+r-4)],fill=(0,0,0,80))
-    def dcl(o=(0,0),c=C_CLOUD): x,y=o[0]+w/2,o[1]+h/2;draw.ellipse([(x-40,y-5),(x+15,y+30)],fill=c);draw.ellipse([(x-20,y-25),(x+40,y+20)],fill=c)
+        C_MAIN = (255, 255, 255); C_SUN = (255, 204, 0); C_CLOUD = (220, 220, 220)
     
-    if icon_name=="sun": ds(so,SHADOW);ds()
-    elif icon_name=="moon": dc(so,SHADOW);dc()
-    elif icon_name=="sun_cloud": dcl((5,8),SHADOW);ds((-12,-12));dcl()
-    elif icon_name=="moon_cloud": dcl((5,8),SHADOW);dc((-12,-12));dcl()
-    else: dcl(so,SHADOW);dcl()
+    def ds(o=(0,0),c=C_SUN): # Enhanced Sun
+        cx,cy,r = w/2+o[0], h/2+o[1], 20
+        draw.ellipse([(cx-r,cy-r),(cx+r,cy+r)], fill=c)
+        for i in range(12):
+            ang = radians(i*30); x1=cx+cos(ang)*(r+3); y1=cy+sin(ang)*(r+3); x2=cx+cos(ang)*(r+8); y2=cy+sin(ang)*(r+8)
+            draw.line([(x1,y1),(x2,y2)], fill=c, width=3)
+
+    def dc(o=(0,0),c=C_MAIN): # Smooth Moon
+        cx,cy,r = w/2+o[0], h/2+o[1], 20
+        draw.ellipse([(cx-r,cy-r),(cx+r,cy+r)], fill=c)
+        draw.ellipse([(cx-r+10,cy-r-4),(cx+r+10,cy+r-4)], fill=(0,0,0,0)) # Masking circle for transparent cutout
+        # Instead of transparency mask with fill, we'll draw it as a crescent
+        # Actually, to avoid background bleed issues in simplified draw, we'll use a darker version of the gradient color or black for the cutout
+        draw.ellipse([(cx-r+12,cy-r-4),(cx+r+10,cy+r-4)], fill=(20, 10, 50, 255)) 
+
+    def dcl(o=(0,0),c=C_CLOUD):
+        x,y = o[0]+w/2, o[1]+h/2
+        draw.ellipse([(x-35,y-5),(x+10,y+25)], fill=c)
+        draw.ellipse([(x-15,y-20),(x+35,y+20)], fill=c)
+
+    if icon_name=="sun": ds()
+    elif icon_name=="moon": dc()
+    elif icon_name=="sun_cloud": ds((-8,-8)); dcl((10,12))
+    elif icon_name=="moon_cloud": dc((-8,-8)); dcl((10,12))
+    else: dcl()
     return icon
 
 def _draw_info_icon(icon_type: str, size: tuple, color: tuple) -> Image.Image:
-    icon = Image.new('RGBA', size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(icon)
-    w, h = size # Unpack the tuple here
+    icon = Image.new('RGBA', size, (0, 0, 0, 0)); draw = ImageDraw.Draw(icon); w,h = size
     if icon_type == 'wind':
-        draw.arc((0, 2, w, h + 2), 180, 270, fill=color, width=2)
-        draw.arc((-5, 7, w - 5, h + 7), 160, 260, fill=color, width=2)
+        draw.arc((0, 4, w-4, h), 180, 270, fill=color, width=2)
+        draw.line((w-4, h/2, w, h/2), fill=color, width=2)
     elif icon_type == 'humidity':
-        draw.pieslice((2, 2, w-2, h-2), -45, 225, fill=color)
-        draw.polygon([(w/2, 0), (2, h * 0.7), (w-2, h * 0.7)], fill=color)
+        draw.ellipse((4, 8, w-4, h-2), fill=color)
+        draw.polygon([(w/2, 2), (4, h*0.6), (w-4, h*0.6)], fill=color)
     elif icon_type == 'sunrise':
-        draw.line((0, h, w, h), fill=color, width=2)
-        draw.arc((0, h/2, w, h * 1.5), 190, 350, fill=color, width=2)
+        draw.line((2, h-2, w-2, h-2), fill=color, width=2)
+        draw.arc((2, 4, w-2, h+4), 210, 330, fill=color, width=2)
     elif icon_type == 'sunset':
-        draw.line((0, h, w, h), fill=color, width=2)
-        draw.arc((0, -h/2 + h, w, h/2 + h), 10, 170, fill=color, width=2)
+        draw.line((2, h-2, w-2, h-2), fill=color, width=2)
+        draw.arc((2, -2, w-2, h-2), 30, 150, fill=color, width=2)
+    return icon
+
+def _draw_location_pin(size: tuple, color: tuple) -> Image.Image:
+    icon = Image.new('RGBA', size, (0, 0, 0, 0)); draw = ImageDraw.Draw(icon); w,h = size
+    draw.ellipse((w/4, 0, 3*w/4, h/2), fill=color)
+    draw.polygon([(w/4, h/4), (3*w/4, h/4), (w/2, h)], fill=color)
+    draw.ellipse((w/2-2, h/4-2, w/2+2, h/4+2), fill=(0,0,0,100))
     return icon
 
 def create_ui_image(time_str: str, date_str: str, weather_info: dict | None, is_stale: bool = False, stale_age_str: str = "") -> Image.Image:
-    """
-    Composes the final, polished UI with a 3-zone landscape layout.
-    """
     theme = config.get_current_theme()
     image = _draw_background(theme)
     draw = ImageDraw.Draw(image)
-    
-    # --- Define Colors based on Stale State ---
     primary_color = config.COLOR_STALE if is_stale else theme["text_primary"]
     secondary_color = config.COLOR_STALE if is_stale else theme["text_secondary"]
     
-    # --- Define Layout Zones ---
-    separator_y = 160 
+    # Visual Separator
+    draw.line([(20, 160), (config.LCD_WIDTH - 20, 160)], fill=(255,255,255,60), width=1)
     
-    # --- Visual Separator ---
-    draw.line([(15, separator_y), (config.LCD_WIDTH - 15, separator_y)], fill=(255,255,255,50), width=1)
+    # Left Zone
+    lx = 105
+    draw.text((lx, 60), time_str, font=config.FONT_TIME, fill=primary_color, anchor="ms")
+    draw.text((lx, 105), date_str, font=config.FONT_DATE, fill=secondary_color, anchor="ms")
     
-    # =========================================================================
-    # --- Top Zone (Split into Left and Right)
-    # =========================================================================
-    top_center_y = separator_y // 2 # 80
-    
-    # --- Adjust the center point for the left column ---
-    left_center_x = 90
-    
-    right_center_x = 240
-    
-    # --- Top-Left: Time, Date, and Location ---
-    # Time
-    draw.text((left_center_x, 65), time_str, font=config.FONT_TIME, fill=theme["text_primary"], anchor="ms")
-    # Date (With Year now, from display_manager)
-    draw.text((left_center_x, 110), date_str, font=config.FONT_DATE, fill=theme["text_secondary"], anchor="ms")
-    
-    # Location
-    # Positioned at 138 (between date 110 and separator 160)
-    draw.text((left_center_x, 142), config.LOCATION_NAME, font=config.FONT_LOCATION, fill=theme["text_secondary"], anchor="ms")
+    # Location with Pin
+    pin_size = (16, 20)
+    pin_img = _draw_location_pin(pin_size, secondary_color)
+    loc_name = config.LOCATION_NAME[:18] 
+    loc_w = draw.textlength(loc_name, font=config.FONT_LOCATION)
+    px = int(lx - (loc_w / 2) - 12)
+    image.paste(pin_img, (px, 122), pin_img)
+    draw.text((lx + 6, 134), loc_name, font=config.FONT_LOCATION, fill=secondary_color, anchor="ms")
 
-
-    # --- Top-Right: Weather ---
+    # Right Zone
+    rx = 262; cy = 45
     if weather_info:
-        icon_size = (90, 70)
-        icon_img = _create_weather_icon(weather_info['icon'], icon_size, is_stale)
-        image.paste(icon_img, (right_center_x - icon_size[0] // 2, top_center_y - 80), icon_img)
-        
-        temp_text = f"{weather_info['temperature']}°C"
-        desc_text = weather_info['description']
-        
-        draw.text((right_center_x, top_center_y + 25), temp_text, font=config.FONT_TEMP, fill=primary_color, anchor="ms")
-        draw.text((right_center_x, top_center_y + 50), desc_text, font=config.FONT_WEATHER, fill=secondary_color, anchor="ms")
-
-        # --- Show Data Age if Stale ---
-        if is_stale and stale_age_str:
-             draw.text((right_center_x, top_center_y + 70), f"Updated {stale_age_str} ago", font=config.FONT_DATA_AGE, fill=config.COLOR_STALE, anchor="ms")
-
-    else:
-        # --- Placeholder Mode (No Data) ---
-        draw.text((right_center_x, top_center_y + 30), "--°C", font=config.FONT_TEMP, fill=config.COLOR_STALE, anchor="ms")
-        draw.text((right_center_x, top_center_y + 60), "No Data", font=config.FONT_WEATHER, fill=config.COLOR_STALE, anchor="ms")
-        
-        # Draw a simple placeholder circle for icon
-        r = 20
-        cx, cy = right_center_x, top_center_y - 40
-        draw.ellipse([(cx-r, cy-r), (cx+r, cy+r)], outline=config.COLOR_STALE, width=2)
-        draw.text((cx, cy), "?", font=config.FONT_INFO_VALUE, fill=config.COLOR_STALE, anchor="mm")
-
-
-    # =========================================================================
-    # --- Bottom Zone: Additional Info
-    # =========================================================================
+        icon_img = _create_weather_icon(weather_info['icon'], (120, 100), is_stale)
+        image.paste(icon_img, (rx - 60, cy - 50), icon_img)
+        draw.text((rx, cy + 65), f"{weather_info['temperature']}°C", font=config.FONT_TEMP, fill=primary_color, anchor="ms")
+        draw.text((rx, cy + 90), weather_info['description'].title(), font=config.FONT_WEATHER, fill=secondary_color, anchor="ms")
     
-    # Common layout calc
-    num_cols = 4
-    col_width = config.LCD_WIDTH / num_cols
-    col_centers = [int(col_width * (i + 0.5)) for i in range(num_cols)]
-    
-    y_pos_icon = separator_y + 25
-    y_pos_header = y_pos_icon + 20
-    y_pos_value = y_pos_header + 22
-    icon_size_small = 20
+    # Bottom Zone
+    cols = 4; col_w = config.LCD_WIDTH / cols
+    labels = ["WIND", "HUMIDITY", "SUNRISE", "SUNSET"]
+    keys = ["windspeed", "humidity", "sunrise", "sunset"]
+    for i in range(cols):
+        cx = int(col_w * (i + 0.5)); y = 180
+        icon = _draw_info_icon(keys[i].split('speed')[0], (22, 22), secondary_color)
+        image.paste(icon, (cx-11, y), icon)
+        draw.text((cx, y+35), labels[i], font=config.FONT_INFO_HEADER, fill=secondary_color, anchor="ms")
+        val = f"{weather_info[keys[i]]}{' km/h' if i==0 else '%' if i==1 else ''}" if weather_info else "..."
+        draw.text((cx, y+55), val, font=config.FONT_INFO_VALUE, fill=primary_color, anchor="ms")
 
-    # Define headers and logic for values
-    labels = ["Wind", "Humidity", "Sunrise", "Sunset"]
-    icon_types = ["wind", "humidity", "sunrise", "sunset"]
-    
-    if weather_info:
-        values = [
-            f"{weather_info['windspeed']} km/h",
-            f"{weather_info['humidity']}%",
-            weather_info['sunrise'],
-            weather_info['sunset']
-        ]
-        active_icon_color = secondary_color
-        active_val_color = primary_color
-    else:
-        values = ["...", "...", "--:--", "--:--"]
-        active_icon_color = config.COLOR_STALE
-        active_val_color = config.COLOR_STALE
-
-    for i in range(4):
-        # Draw Icon
-        icon_img = _draw_info_icon(icon_types[i], (icon_size_small, icon_size_small), active_icon_color)
-        image.paste(icon_img, (col_centers[i] - icon_size_small // 2, y_pos_icon - icon_size_small // 2), icon_img)
-        
-        # Draw Header
-        draw.text((col_centers[i], y_pos_header), labels[i], font=config.FONT_INFO_HEADER, fill=active_icon_color, anchor="ms")
-        
-        # Draw Value
-        draw.text((col_centers[i], y_pos_value), values[i], font=config.FONT_INFO_VALUE, fill=active_val_color, anchor="ms")
-        
     return image.convert('RGB')

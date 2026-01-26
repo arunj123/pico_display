@@ -26,6 +26,7 @@ No need to recompile to change Wi-Fi networks!
 ### 3. Host Weather Application (`pi_gateway/board/overlay/opt/pico_display/display_manager.py`)
 A Python application running on your PC/Mac/Raspberry Pi:
 * **Live Data:** Fetches real-time weather from the Open-Meteo API.
+* **Smart Configuration:** Reads settings from `/tmp/config.json`, which is populated by the system init script from the persistent `/mnt/data/config.json` on boot.
 * **Dynamic UI:** Generates a beautiful gradient background that changes based on the time of day (Morning/Day/Sunset/Night).
 * **Efficient Transport:** Only sends changed pixels (diffs) to the Pico W to minimize latency.
 
@@ -75,9 +76,15 @@ You do **not** need to edit header files to set up Wi-Fi.
 
 ### 2. Host Settings (Python)
 The host application uses **UDP Auto-Discovery** to find the Pico W.
-1.  Navigate to `pi_gateway/board/overlay/opt/pico_display/`.
-2.  Edit `config.py` to set your Location (Latitude/Longitude).
-3.  (Optional) You can manually set `PICO_IP` if discovery fails.
+1.  **BLE Method (Recommended):** Use the "Gateway Setup" Web Interface.
+    *   Connect to the device via Bluetooth.
+    *   The Map will auto-load your current saved location.
+    *   Select a new point and click "Save". The device will persist this to `config.json` and reboot.
+2.  **Manual Method:**
+    *   Connect the device to PC via USB.
+    *   Open the "Data Partition" drive.
+    *   Edit `config.json`: `{"name":"Paris", "lat":48.85, "lon":2.35}`.
+    *   *Note: If `config.json` is missing, the system will auto-create a default one on boot.*
 
 ---
 
@@ -200,10 +207,21 @@ The device now intelligently manages the USB connection:
     - `wifi.conf`: WPA Supplicant configuration.
     - `config.json`: Location and Settings.
 
-### 3. BLE Provisioning
-- **Device Name**: "Gateway Setup"
-- **Service UUID**: `0xFF00`
-- **Characteristics**:
-    - `0xFF01` (Write): WiFi Credentials
-    - `0xFF02` (Write): Location Data
-- **Pairing**: Just Works (Auto-confirm)
+### 3. BLE Provisioning (GATT)
+
+The project supports provisioning for both firmware targets, but their capabilities differ:
+
+#### A. Pi Gateway (Linux / Pi Zero 2W)
+- **Device Name:** "Gateway Setup"
+- **Service UUID:** `4fafc201-1fb5-459e-8fcc-c5c9c331914b`
+- **Characteristics:**
+    - `0xbeb5...` (Handle `0x0032`): **Read/Write** (SSID & Password)
+    - `0x0000...` (Handle `0x0034`): **Read/Write** (Location/Config JSON)
+- **Features:** Full read/write support, partial save, write buffering.
+
+#### B. Pico Controller (Microcontroller / Pico W)
+- **Device Name:** "Pico Setup"
+- **Service UUID:** `0000FF00-0000-1000-8000-00805F9B34FB`
+- **Characteristics:**
+    - `0xFF01`: **Write-Only** (Wi-Fi Credentials)
+- **Note:** The Pico W firmware uses a lightweight stack and *only* supports Wi-Fi credential provisioning. It does not support location configuration or reading back saved data.

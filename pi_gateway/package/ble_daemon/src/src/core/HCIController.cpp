@@ -278,8 +278,8 @@ void HCIController::process_events() {
 
     uint8_t event_code = buf[1];
     
-    // Debug Log for Non-Advertising events
-    if (event_code != EVT_LE_META_EVENT || (len > 3 && buf[3] != EVT_LE_ADVERTISING_REPORT)) {
+    // Debug Log for Non-Advertising/CmdComplete events
+    if (event_code != EVT_LE_META_EVENT && event_code != 0x0E && (len > 3 && buf[3] != EVT_LE_ADVERTISING_REPORT)) {
          std::cout << timestamp() << " [HCI] Event: 0x" << std::hex << (int)event_code << std::dec << std::endl;
                          
          if (event_code == 0x05) { // Disconnection Complete

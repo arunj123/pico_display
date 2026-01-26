@@ -23,6 +23,42 @@ static int g_acl_alignment_offset = 0;
 
 
 ProvisioningModule::ProvisioningModule(HCIController& hci) : hci_(hci) {
+    // Load persisted state on startup
+    // 1. Wi-Fi Config (Read from /tmp, populated by Init Script)
+    std::ifstream wifi("/tmp/wifi.conf");
+    if (wifi.is_open()) {
+        std::string line;
+        while (std::getline(wifi, line)) {
+            // Simple parsing for ssid="value" and psk="value"
+            size_t ssid_pos = line.find("ssid=\"");
+            if (ssid_pos != std::string::npos) {
+                size_t end = line.find("\"", ssid_pos + 6);
+                if (end != std::string::npos) {
+                    stored_ssid_ = line.substr(ssid_pos + 6, end - (ssid_pos + 6));
+                    // std::cout << "[PROV] Loaded SSID: " << stored_ssid_ << std::endl;
+                }
+            }
+            size_t psk_pos = line.find("psk=\"");
+            if (psk_pos != std::string::npos) {
+                size_t end = line.find("\"", psk_pos + 5);
+                if (end != std::string::npos) {
+                    stored_pass_ = line.substr(psk_pos + 5, end - (psk_pos + 5));
+                    // std::cout << "[PROV] Loaded PSK: " << (stored_pass_.empty() ? "Empty" : "***") << std::endl;
+                }
+            }
+        }
+    }
+    
+    // 2. Config/Location from config.json (Read from /tmp)
+    std::ifstream loc("/tmp/config.json");
+    if (loc.is_open()) {
+        std::string content((std::istreambuf_iterator<char>(loc)), std::istreambuf_iterator<char>());
+        stored_loc_ = content;
+        // std::cout << "[PROV] Loaded Config: " << stored_loc_ << std::endl;
+    }
+    
+
+
     setup_gatt_db();
 }
 
@@ -50,9 +86,9 @@ void ProvisioningModule::on_le_meta_event(uint8_t subevent_code, std::span<const
              uint8_t status = data[0];
              uint16_t handle = data[1] | (data[2] << 8);
              
-             std::cout << "[PROV] Event 0x03 (" << data.size() << ") Raw: ";
-             for(auto b : data) std::cout << std::hex << (int)b << " ";
-             std::cout << std::dec << "| Curr H=0x" << std::hex << conn_handle_ << " New H=0x" << handle << std::dec << std::endl;
+             // std::cout << "[PROV] Event 0x03 (" << data.size() << ") Raw: ";
+             // for(auto b : data) std::cout << std::hex << (int)b << " ";
+             // std::cout << std::dec << "| Curr H=0x" << std::hex << conn_handle_ << " New H=0x" << handle << std::dec << std::endl;
              
              // Detect Shift in Event 0x03 (if present)
              bool shifted = false;
@@ -78,9 +114,9 @@ void ProvisioningModule::on_le_meta_event(uint8_t subevent_code, std::span<const
     else if (subevent_code == 0x04) { // LE Remote Connection Parameter Request
          if (data.size() < 2) return;
          
-         std::cout << "[PROV] Event 0x04Raw: ";
-         for(auto b : data) std::cout << std::hex << (int)b << " ";
-         std::cout << std::dec << "| Curr H=0x" << std::hex << conn_handle_ << std::dec << std::endl;
+         // std::cout << "[PROV] Event 0x04Raw: ";
+         // for(auto b : data) std::cout << std::hex << (int)b << " ";
+         // std::cout << std::dec << "| Curr H=0x" << std::hex << conn_handle_ << std::dec << std::endl;
          
          int offset = 0;
          // Heuristic: If size is >= 11 (expected 10), it's shifted.
@@ -199,7 +235,7 @@ void ProvisioningModule::on_acl_data(std::span<const uint8_t> data) {
     if (cid == L2CAP_CID_ATT) {
         // std::cout << "[PROV] RX ATT Packet. Op: " << std::hex << (int)l2cap_pkt[4] << std::dec << std::endl;
     } else {
-        std::cout << "[PROV] RX L2CAP CID: 0x" << std::hex << cid << " Len: " << l2cap_pkt.size() << std::dec << std::endl;
+        // std::cout << "[PROV] RX L2CAP CID: 0x" << std::hex << cid << " Len: " << l2cap_pkt.size() << std::dec << std::endl;
     }
     
     if (cid == L2CAP_CID_ATT) { // 4
@@ -242,9 +278,9 @@ void ProvisioningModule::process_att_packet(int fd, std::vector<uint8_t>& p) {
     if (p.empty()) return;
     uint8_t opcode = p[0];
     
-    std::cout << "[PROV] RX Op: 0x" << std::hex << (int)opcode << " Len: " << p.size() << " Data: ";
-    for(auto b : p) std::cout << std::hex << (int)b << " ";
-    std::cout << std::dec << std::endl;
+    // std::cout << "[PROV] RX Op: 0x" << std::hex << (int)opcode << " Len: " << p.size() << " Data: ";
+    // for(auto b : p) std::cout << std::hex << (int)b << " ";
+    // std::cout << std::dec << std::endl;
     
     if (opcode == ATT_OP_EXCHANGE_MTU_REQ) {
         uint16_t server_mtu = 128; 
@@ -326,12 +362,29 @@ void ProvisioningModule::process_att_packet(int fd, std::vector<uint8_t>& p) {
         else if (handle == 0x0014) { uint8_t val[] = {ATT_OP_READ_RESP, 0x00, 0x00}; send_response(fd, {val[0], val[1], val[2]}); }
         else if (handle == 0x0022) { std::string val = "PiGateway"; std::vector<uint8_t> resp(1 + val.size()); resp[0] = ATT_OP_READ_RESP; memcpy(&resp[1], val.c_str(), val.size()); send_response(fd, resp); }
         else if (handle == 0x002A) { uint8_t val[] = {ATT_OP_READ_RESP, 100}; send_response(fd, {val[0], val[1]}); }
-        else if (handle == 0x0032 || handle == 0x0034) { std::string val = "{}"; std::vector<uint8_t> resp(1 + val.size()); resp[0] = ATT_OP_READ_RESP; memcpy(&resp[1], val.c_str(), val.size()); send_response(fd, resp); }
+        else if (handle == 0x0032) { // SSID
+             std::string val = stored_ssid_;
+             if (val.empty()) val = "";
+             std::vector<uint8_t> resp; resp.push_back(ATT_OP_READ_RESP);
+             resp.insert(resp.end(), val.begin(), val.end());
+             send_response(fd, resp);
+        }
+        else if (handle == 0x0034) { // Location/Config
+             std::string val = stored_loc_;
+             if (val.empty()) val = "{}";
+             // Chunking support is not implemented for READ in this simple daemon
+             // If > 22 bytes (MTU), client will only get first chunk.
+             if (val.length() > 500) val = val.substr(0, 500); // Guard
+             
+             std::vector<uint8_t> resp; resp.push_back(ATT_OP_READ_RESP);
+             resp.insert(resp.end(), val.begin(), val.end());
+             send_response(fd, resp);
+        }
         else { send_error(fd, opcode, handle, 0x0A); }
     }
     else if (opcode == ATT_OP_WRITE_REQ || opcode == ATT_OP_WRITE_CMD) {
         uint16_t handle = p[1] | (p[2]<<8);
-        if (handle == 0x0032) { handle_write_req(fd, p.data(), p.size()); } 
+        if (handle == 0x0032 || handle == 0x0034) { handle_write_req(fd, p.data(), p.size()); } 
         else if (handle == 0x0004) { if (opcode == ATT_OP_WRITE_REQ) { uint8_t resp[] = {ATT_OP_WRITE_RESP}; send_response(fd, {resp[0]}); } }
         else { if (opcode == ATT_OP_WRITE_REQ) send_error(fd, opcode, handle, 0x0A); }
     }
@@ -343,24 +396,109 @@ void ProvisioningModule::setup_gatt_db() {}
 void ProvisioningModule::handle_write_req(int client_fd, const uint8_t* data, size_t len) {
     if (len > 3) {
         std::string payload((const char*)data + 3, len - 3);
-        std::cout << "\n[PROV] WRITE: " << payload << std::endl;
-        if (!payload.empty()) {
-            if (payload.rfind("S:", 0) == 0) stored_ssid_ = payload.substr(2);
-            else if (payload.rfind("P:", 0) == 0) stored_pass_ = payload.substr(2);
-            else if (payload == "SAVE") save_and_reboot();
-            else if (payload == "EXIT") { hci_.stop_scan(); }
+        std::cout << "[PROV] RX: " << payload << std::endl;
+        
+        // Append to buffer for potential fragmentation
+        write_buffer_ += payload;
+
+        // Check for Simple Commands first (not JSON)
+        if (payload.rfind("S:", 0) == 0) { 
+             stored_ssid_ = payload.substr(2); 
+             write_buffer_.clear(); 
+        }
+        else if (payload.rfind("P:", 0) == 0) { 
+             stored_pass_ = payload.substr(2); 
+             write_buffer_.clear(); 
+        }
+        else if (payload == "SAVE") { 
+             save_and_reboot(); 
+             write_buffer_.clear(); 
+        }
+        else if (payload == "EXIT") { 
+             hci_.stop_scan(); 
+             write_buffer_.clear(); 
+        }
+        // Check for JSON start
+        else if (write_buffer_.rfind("{", 0) == 0) {
+             // Heuristic: If it starts with { and ends with }, assume complete.
+             // This supports simple non-nested JSON objects like {"name":"X","lat":1,"lon":2}
+             // For more complex stream parsing, a json parser is needed, but this suffices for known client.
+             
+             // Trim potential garbage/whitespace at end?
+             // No, just check if last char is '}'
+             if (write_buffer_.size() > 2 && write_buffer_.back() == '}') {
+                 std::cout << "[PROV] JSON Complete: " << write_buffer_ << std::endl;
+                 stored_loc_ = write_buffer_;
+                 write_buffer_.clear();
+             } else {
+                 std::cout << "[PROV] JSON Fragment Buffered (" << write_buffer_.size() << " bytes)..." << std::endl;
+             }
+        }
+        else {
+             // Unknown/Garbage? Clear buffer to prevent stale state
+             // Or maybe it's a middle fragment we missed the start of?
+             // For now, if it doesn't match known prefixes and buffer is empty, it's trash.
+             if (write_buffer_.length() == payload.length()) { // Buffer was just this payload
+                  std::cout << "[PROV] Unknown Command received." << std::endl;
+                  write_buffer_.clear();
+             }
         }
     }
     if (data[0] == ATT_OP_WRITE_REQ) { send_response(client_fd, {ATT_OP_WRITE_RESP}); }
 }
 
 void ProvisioningModule::save_and_reboot() {
-    if (stored_ssid_.empty()) return;
-    std::cout << "[PROV] Saving Config for SSID: " << stored_ssid_ << std::endl;
-    system("mkdir -p /mnt/data"); system("mount /dev/mmcblk0p3 /mnt/data");
-    std::ofstream wifi_file("/mnt/data/wifi.conf");
-    if (wifi_file.is_open()) { wifi_file << "country=DE\nupdate_config=1\n\nnetwork={\n\tssid=\"" << stored_ssid_ << "\"\n\tpsk=\"" << stored_pass_ << "\"\n\tkey_mgmt=WPA-PSK\n}\n"; wifi_file.close(); }
-    system("sync"); system("umount /mnt/data"); system("reboot");
+    std::cout << "[PROV] Config State Check:" << std::endl;
+    std::cout << " SSID: '" << stored_ssid_ << "'" << std::endl;
+    std::cout << " LOC:  '" << stored_loc_ << "'" << std::endl;
+
+    if (stored_ssid_.empty() && stored_loc_.empty()) {
+        std::cout << "[PROV] Nothing to save!" << std::endl;
+        return;
+    }
+    
+    std::cout << "[PROV] Saving Configuration..." << std::endl;
+    
+    // RELEASE USB LOCK: Unbind mass storage so checking mount works
+    // This is critical if the user is powered via PC/USB
+    std::cout << "[PROV] Releasing USB Mass Storage Lock..." << std::endl;
+    // We try to unbind the backing file from the gadget
+    system("echo \"\" > /sys/kernel/config/usb_gadget/mygadget/functions/mass_storage.usb0/lun.0/file");
+    sleep(1);
+
+    // Hardening: Ensure we can write to /mnt/data
+    system("mount -o remount,rw /"); // Make root RW if needed
+    system("mkdir -p /mnt/data"); 
+    system("mount /dev/mmcblk0p3 /mnt/data"); // Try mount
+    system("mount -o remount,rw /mnt/data"); // Ensure RW if already mounted
+    
+    bool saved = false;
+
+    if (!stored_ssid_.empty()) {
+        std::cout << "Saving Wi-Fi Config for SSID: " << stored_ssid_ << std::endl;
+        std::ofstream wifi_file("/mnt/data/wifi.conf");
+        if (wifi_file.is_open()) { wifi_file << "country=DE\nupdate_config=1\n\nnetwork={\n\tssid=\"" << stored_ssid_ << "\"\n\tpsk=\"" << stored_pass_ << "\"\n\tkey_mgmt=WPA-PSK\n}\n"; wifi_file.close(); saved=true; }
+        else { std::cerr << "[PROV] Failed to open wifi.conf for writing!" << std::endl; }
+    }
+
+    if (!stored_loc_.empty()) {
+        std::cout << "Saving Location/Config Data..." << std::endl;
+        std::ofstream loc_file("/mnt/data/config.json");
+        if (loc_file.is_open()) { loc_file << stored_loc_; loc_file.close(); saved=true; }
+        else { std::cerr << "[PROV] Failed to open config.json for writing!" << std::endl; }
+    }
+
+    system("sync"); 
+    // Do not unmount, just reboot to be safe.
+    
+    if (saved) {
+        std::cout << "Cleaning seed.credit and Rebooting..." << std::endl;
+        system("rm -f /var/lib/seedrng/seed.credit");
+        system("reboot");
+    } else {
+        std::cerr << "[PROV] Save failed or nothing to save." << std::endl;
+        // Force reboot anyway if we attempted? No, only if saved.
+    }
 }
 
 void ProvisioningModule::start_advertising() {
@@ -386,9 +524,9 @@ void ProvisioningModule::send_response(int fd, const std::vector<uint8_t>& resp)
     packet.push_back(len & 0xFF); packet.push_back((len >> 8) & 0xFF);
     packet.push_back(cid & 0xFF); packet.push_back((cid >> 8) & 0xFF);
     packet.insert(packet.end(), resp.begin(), resp.end());
-    std::cout << "[PROV] TX to H=0x" << std::hex << conn_handle_ << " Len=" << std::dec << resp.size() << " Data: ";
-    for(auto b : resp) std::cout << std::hex << (int)b << " ";
-    std::cout << std::dec << std::endl;
+    // std::cout << "[PROV] TX to H=0x" << std::hex << conn_handle_ << " Len=" << std::dec << resp.size() << " Data: ";
+    // for(auto b : resp) std::cout << std::hex << (int)b << " ";
+    // std::cout << std::dec << std::endl;
     hci_.send_acl(conn_handle_, packet);
 }
 

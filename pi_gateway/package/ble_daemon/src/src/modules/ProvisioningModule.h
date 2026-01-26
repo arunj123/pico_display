@@ -38,6 +38,8 @@ private:
     std::chrono::steady_clock::time_point last_activity_;
     std::string stored_ssid_;
     std::string stored_pass_;
+    std::string stored_loc_;
+    std::string write_buffer_; // For reassembling fragmented writes
     // L2CAPServer l2cap_; // Removed
     std::map<uint16_t, Attribute> db_;
     

@@ -33,7 +33,10 @@ LOCATION_LON = 11.0896
 WEATHER_UPDATE_INTERVAL_SECONDS = 15 * 60
 
 # --- Load Dynamic Config ---
-CONFIG_JSON_PATH = "/mnt/data/config.json"
+# --- Load Dynamic Config ---
+# Read from /tmp (Created by S99picodisplay from /mnt/data/config.json)
+CONFIG_JSON_PATH = "/tmp/config.json"
+
 if os.path.exists(CONFIG_JSON_PATH):
     try:
         with open(CONFIG_JSON_PATH, 'r') as f:

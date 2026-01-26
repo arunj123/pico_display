@@ -108,6 +108,23 @@ start() {
         printf "country=DE\nupdate_config=1\n\nnetwork={\n\tssid=\"YOUR_SSID\"\n\tpsk=\"YOUR_PASS\"\n\tkey_mgmt=WPA-PSK\n}\n" > /tmp/wifi.conf
     fi
 
+    # --- Config.json Management ---
+    CONFIG_JSON="$DATA_DIR/config.json"
+    if [ ! -f "$CONFIG_JSON" ]; then
+        log "Initializing config.json..."
+        mount -o remount,rw $DATA_DIR
+        echo '{"name":"Hasenbuck","lat":49.4247,"lon":11.0896}' > "$CONFIG_JSON"
+        mount -o remount,ro $DATA_DIR
+    fi
+    
+    if [ -f "$CONFIG_JSON" ]; then
+        cp "$CONFIG_JSON" /tmp/config.json
+    else
+        # Fallback if creation failed
+        echo '{"name":"Hasenbuck","lat":49.4247,"lon":11.0896}' > /tmp/config.json
+    fi
+    # ------------------------------
+
     # Unmount Data Partition to release lock
     umount /mnt/data 2>/dev/null
 
