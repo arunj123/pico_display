@@ -62,7 +62,10 @@ try:
     FONT_INFO_VALUE = ImageFont.truetype(FONT_PATH_BOLD, 18)
     FONT_DATA_AGE = ImageFont.truetype(FONT_PATH_REGULAR, 14)
     # Reuse Weather font for Location
-    FONT_LOCATION = ImageFont.truetype(FONT_PATH_REGULAR, 20) 
+    FONT_LOCATION = ImageFont.truetype(FONT_PATH_REGULAR, 20)
+    # Larger fonts for sensor values
+    FONT_SENSOR_TEMP = ImageFont.truetype(FONT_PATH_BOLD, 28)
+    FONT_SENSOR_HUM = ImageFont.truetype(FONT_PATH_BOLD, 20)
 except IOError:
     print("Warning: Custom fonts not found. Using default.")
     FONT_TIME = ImageFont.load_default()

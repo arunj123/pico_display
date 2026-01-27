@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Home Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="dashboard">
+        <!-- Weather Card -->
+        <div class="weather-card glass-card">
+            <div class="time-section">
+                <div class="time" id="current-time">--:--</div>
+                <div class="date" id="current-date">Loading...</div>
+                <div class="location">📍 Hasenbuck</div>
+            </div>
+            <div class="weather-section">
+                <div class="weather-icon" id="weather-icon">☀️</div>
+                <div class="temperature" id="temperature">--°C</div>
+                <div class="description" id="weather-desc">Loading...</div>
+            </div>
+        </div>
+
+        <!-- Weather Details -->
+        <div class="details-row">
+            <div class="detail-card glass-card">
+                <span class="detail-icon">💨</span>
+                <span class="detail-value" id="wind">--</span>
+                <span class="detail-label">Wind</span>
+            </div>
+            <div class="detail-card glass-card">
+                <span class="detail-icon">💧</span>
+                <span class="detail-value" id="humidity">--</span>
+                <span class="detail-label">Humidity</span>
+            </div>
+            <div class="detail-card glass-card">
+                <span class="detail-icon">🌅</span>
+                <span class="detail-value" id="sunrise">--:--</span>
+                <span class="detail-label">Sunrise</span>
+            </div>
+            <div class="detail-card glass-card">
+                <span class="detail-icon">🌇</span>
+                <span class="detail-value" id="sunset">--:--</span>
+                <span class="detail-label">Sunset</span>
+            </div>
+        </div>
+
+        <!-- Sensors Section -->
+        <h2 class="section-title">Home Sensors</h2>
+        <div class="sensors-grid" id="sensors-grid">
+            <!-- Sensor cards will be injected by JS -->
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

@@ -59,8 +59,8 @@ def create_ui_image(time_str: str, date_str: str, weather_info: dict | None, is_
     # Right Zone (Weather Icon and Temp)
     rx = 262; cy = 45
     if weather_info:
-        icon_img = ui_components.create_weather_icon(weather_info['icon'], (120, 100), is_stale)
-        image.paste(icon_img, (rx - 60, cy - 50), icon_img)
+        icon_img = ui_components.create_weather_icon(weather_info['icon'], (60, 60), is_stale)
+        image.paste(icon_img, (rx - 30, cy - 30), icon_img)
         draw.text((rx, cy + 65), f"{weather_info['temperature']}°C", font=config.FONT_TEMP, fill=primary_color, anchor="ms")
         draw.text((rx, cy + 90), weather_info['description'].title(), font=config.FONT_WEATHER, fill=secondary_color, anchor="ms")
     
@@ -88,14 +88,11 @@ def create_sensor_ui_image(sensor_data: dict) -> Image.Image:
     d_overlay = ImageDraw.Draw(overlay)
     draw = ImageDraw.Draw(image)
     
-    # Header
-    draw.text((config.LCD_WIDTH/2, 25), "Home Sensors", font=config.FONT_LOCATION, fill=theme["text_secondary"], anchor="ms")
-    d_overlay.line([(20, 35), (config.LCD_WIDTH-20, 35)], fill=(255,255,255,60), width=1)
-
+    # No header - use full space for sensor cards
     # Grid constants
-    margin_x = 12; margin_y = 45
+    margin_x = 10; margin_y = 10
     col_w = (config.LCD_WIDTH - 2*margin_x) / 2
-    row_h = (config.LCD_HEIGHT - margin_y - 10) / 3
+    row_h = (config.LCD_HEIGHT - margin_y - 6) / 3
     
     sensor_names = ["Kindr", "Wohn", "Flur", "Bad", "Kuche", "Schlf"]
     current_time = time.time()
@@ -105,7 +102,7 @@ def create_sensor_ui_image(sensor_data: dict) -> Image.Image:
         x = int(margin_x + col * col_w)
         y = int(margin_y + row * row_h)
         
-        ui_components.draw_glass_card(draw, d_overlay, x, y, col_w, row_h, name, sensor_data.get(name), theme, current_time)
+        ui_components.draw_glass_card(draw, d_overlay, image, x, y, col_w, row_h, name, sensor_data.get(name), theme, current_time)
 
     # Composite layers
     combined = Image.alpha_composite(image, overlay)

@@ -6,14 +6,24 @@ import threading
 import json
 from datetime import datetime
 from PIL import Image, ImageChops
+from http.server import HTTPServer, SimpleHTTPRequestHandler
+from urllib.parse import urlparse
 import os
 import config
 import weather
 import ui_generator
+import ui_theme
 
 # Global sensor data storage
 sensor_data = {}
 sensor_data_lock = threading.Lock()
+
+# Global weather data (shared with web server)
+current_weather = None
+weather_lock = threading.Lock()
+
+WEB_DASHBOARD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web_dashboard')
+WEB_SERVER_PORT = 5000
 
 def uds_listener_thread():
     """Listens for sensor updates from ble_daemon over UDS."""
@@ -63,6 +73,59 @@ def uds_listener_thread():
 
 # Start UDS listener thread
 threading.Thread(target=uds_listener_thread, daemon=True).start()
+
+# --- Embedded Web Server ---
+class DashboardHandler(SimpleHTTPRequestHandler):
+    """HTTP handler that serves the dashboard and provides API endpoints."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=WEB_DASHBOARD_DIR, **kwargs)
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        
+        if parsed.path == '/api/weather':
+            with weather_lock:
+                data = current_weather or {"error": "No weather data"}
+            self.send_json(data)
+        elif parsed.path == '/api/sensors':
+            with sensor_data_lock:
+                self.send_json(sensor_data.copy())
+        elif parsed.path == '/api/theme':
+            theme = ui_theme.get_current_theme()
+            # Convert Python tuples to CSS colors
+            self.send_json({
+                "name": theme["name"],
+                "gradient_start": f"rgb{theme['gradient_start']}",
+                "gradient_end": f"rgb{theme['gradient_end']}",
+                "text_primary": "#ffffff",
+                "text_secondary": f"rgba{(*theme['text_secondary'], 0.9)}"
+            })
+        else:
+            super().do_GET()
+
+    def send_json(self, data):
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
+
+    def log_message(self, format, *args):
+        pass  # Suppress HTTP logs
+
+def start_web_server():
+    """Starts the embedded web server in a background thread."""
+    if not os.path.isdir(WEB_DASHBOARD_DIR):
+        print(f"[Web] Dashboard directory not found: {WEB_DASHBOARD_DIR}")
+        return
+    try:
+        server = HTTPServer(('0.0.0.0', WEB_SERVER_PORT), DashboardHandler)
+        print(f"[Web] Dashboard running at http://0.0.0.0:{WEB_SERVER_PORT}")
+        server.serve_forever()
+    except Exception as e:
+        print(f"[Web] Server error: {e}")
+
+threading.Thread(target=start_web_server, daemon=True).start()
 
 class DeviceManager:
     """Manages robust, fire-and-forget TCP communication with the Pico W device."""
@@ -243,8 +306,8 @@ def main():
     previous_image = None
     previous_time_string = ""
     
-    # Persistent weather state
-    current_weather = None
+    # Use global weather state
+    global current_weather
     last_weather_check = 0
     # Force initial update
     force_update = True 
@@ -279,7 +342,8 @@ def main():
                     force_update = False 
                     new_weather = weather.get_weather(config.LOCATION_LAT, config.LOCATION_LON)
                     if new_weather:
-                        current_weather = new_weather
+                        with weather_lock:
+                            current_weather = new_weather
                         last_weather_check = time.time()
                     else:
                         print("Weather fetch failed. Retrying in 1 minute.")
