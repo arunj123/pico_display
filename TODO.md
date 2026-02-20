@@ -1,3 +1,0 @@
-- Add BLE gateway for TP3xx to Pi Image
-- Select location for weather from IP address or override it from config/data  
-- Add bluetooth provisioning in Pi Image, update location, ssid and password

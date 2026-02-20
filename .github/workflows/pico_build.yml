@@ -1,0 +1,47 @@
+name: Pico Device Build
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
+
+    - name: Setup Pico SDK
+      run: |
+        git clone --depth 1 --branch 2.2.0 https://github.com/raspberrypi/pico-sdk.git ${GITHUB_WORKSPACE}/pico-sdk
+        echo "PICO_SDK_PATH=${GITHUB_WORKSPACE}/pico-sdk" >> $GITHUB_ENV
+        cd ${GITHUB_WORKSPACE}/pico-sdk
+        git submodule update --init --depth 1
+
+    - name: Configure CMake
+      run: |
+        cmake -S . -B build -G Ninja -DPICO_BOARD=pico2_w
+
+    - name: Build
+      run: |
+        ninja -C build media_app
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: pico-binaries
+        path: |
+          build/media_app.elf
+          build/media_app.uf2
+          build/media_app.bin

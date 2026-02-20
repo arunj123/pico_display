@@ -6,7 +6,10 @@
             "type": "process",
             "isBuildCommand": true,
             "command": "${userHome}/.pico-sdk/ninja/v1.12.1/ninja",
-            "args": ["-C", "${workspaceFolder}/build"],
+            "args": [
+                "-C",
+                "${workspaceFolder}/build"
+            ],
             "group": "build",
             "presentation": {
                 "reveal": "always",
@@ -33,6 +36,14 @@
             "problemMatcher": [],
             "windows": {
                 "command": "${env:USERPROFILE}/.pico-sdk/picotool/2.2.0/picotool/picotool.exe"
+            },
+            "linux": {
+                "command": "/mnt/c/Users/arunj/.pico-sdk/picotool/2.2.0/picotool/picotool.exe",
+                "args": [
+                    "load",
+                    "//wsl.localhost/Ubuntu-24.04${workspaceFolder}/build/keyboard_app.elf",
+                    "-fx"
+                ]
             }
         },
         {
@@ -51,6 +62,14 @@
             "problemMatcher": [],
             "windows": {
                 "command": "${env:USERPROFILE}/.pico-sdk/picotool/2.2.0/picotool/picotool.exe"
+            },
+            "linux": {
+                "command": "/mnt/c/Users/arunj/.pico-sdk/picotool/2.2.0/picotool/picotool.exe",
+                "args": [
+                    "load",
+                    "//wsl.localhost/Ubuntu-24.04${workspaceFolder}/build/media_app.elf",
+                    "-fx"
+                ]
             }
         },
         {
@@ -84,6 +103,19 @@
                     "-c",
                     "adapter speed 5000; program build/keyboard_app.elf verify reset exit"
                 ]
+            },
+            "linux": {
+                "command": "/mnt/c/Users/arunj/.pico-sdk/openocd/0.12.0+dev/openocd.exe",
+                "args": [
+                    "-s",
+                    "C:/Users/arunj/.pico-sdk/openocd/0.12.0+dev/scripts",
+                    "-f",
+                    "interface/cmsis-dap.cfg",
+                    "-f",
+                    "target/${command:raspberry-pi-pico.getTarget}.cfg",
+                    "-c",
+                    "adapter speed 5000; program //wsl.localhost/Ubuntu-24.04${workspaceFolder}/build/keyboard_app.elf verify reset exit"
+                ]
             }
         },
         {
@@ -116,7 +148,20 @@
                     "target/${command:raspberry-pi-pico.getTarget}.cfg",
                     "-c",
                     "adapter speed 5000; program build/media_app.elf verify reset exit"
-                ] 
+                ]
+            },
+            "linux": {
+                "command": "/mnt/c/Users/arunj/.pico-sdk/openocd/0.12.0+dev/openocd.exe",
+                "args": [
+                    "-s",
+                    "C:/Users/arunj/.pico-sdk/openocd/0.12.0+dev/scripts",
+                    "-f",
+                    "interface/cmsis-dap.cfg",
+                    "-f",
+                    "target/${command:raspberry-pi-pico.getTarget}.cfg",
+                    "-c",
+                    "adapter speed 5000; program //wsl.localhost/Ubuntu-24.04${workspaceFolder}/build/media_app.elf verify reset exit"
+                ]
             }
         },
         {
@@ -143,6 +188,19 @@
                 "args": [
                     "-s",
                     "${env:USERPROFILE}/.pico-sdk/openocd/0.12.0+dev/scripts",
+                    "-f",
+                    "interface/cmsis-dap.cfg",
+                    "-f",
+                    "target/${command:raspberry-pi-pico.getChip}-rescue.cfg",
+                    "-c",
+                    "adapter speed 5000; reset halt; exit"
+                ]
+            },
+            "linux": {
+                "command": "/mnt/c/Users/arunj/.pico-sdk/openocd/0.12.0+dev/openocd.exe",
+                "args": [
+                    "-s",
+                    "C:/Users/arunj/.pico-sdk/openocd/0.12.0+dev/scripts",
                     "-f",
                     "interface/cmsis-dap.cfg",
                     "-f",
