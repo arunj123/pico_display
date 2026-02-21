@@ -2,7 +2,7 @@ name: Pico Device Build
 
 on:
   push:
-    branches: [ master, main, 'feature/**' ]
+    branches: [ master, main ]
     paths:
       - 'src/**'
       - 'include/**'
@@ -38,18 +38,39 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
+        sudo apt-get install -y cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib ccache
+
+    - name: Cache Pico SDK
+      id: cache-pico-sdk
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/pico-sdk
+        key: ${{ runner.os }}-pico-sdk-2.2.0
+
+    - name: Cache ccache
+      uses: actions/cache@v4
+      with:
+        path: ~/.ccache
+        key: ${{ runner.os }}-pico-ccache-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-pico-ccache-
 
     - name: Setup Pico SDK
+      if: steps.cache-pico-sdk.outputs.cache-hit != 'true'
       run: |
         git clone --depth 1 --branch 2.2.0 https://github.com/raspberrypi/pico-sdk.git ${GITHUB_WORKSPACE}/pico-sdk
-        echo "PICO_SDK_PATH=${GITHUB_WORKSPACE}/pico-sdk" >> $GITHUB_ENV
         cd ${GITHUB_WORKSPACE}/pico-sdk
         git submodule update --init --depth 1
 
+    - name: Set Pico SDK Path
+      run: |
+        echo "PICO_SDK_PATH=${GITHUB_WORKSPACE}/pico-sdk" >> $GITHUB_ENV
+
     - name: Configure CMake
       run: |
-        cmake -S . -B build -G Ninja -DPICO_BOARD=pico2_w
+        export CCACHE_DIR=$HOME/.ccache
+        ccache -M 1G
+        cmake -S . -B build -G Ninja -DPICO_BOARD=pico2_w -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
     - name: Build
       run: |
