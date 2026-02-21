@@ -198,3 +198,10 @@ make -C buildroot O=$(pwd)/output linux-reinstall
 # linux-firmware-rebuild
 make -C buildroot O=$(pwd)/output rpi-firmware-rebuild
 ```
+
+### 7.4. Clean Target Install of Buildroot
+```bash
+rm -rf output/target
+find output/ -name ".stamp_target_installed" -delete
+rm -f output/build/host-gcc-final-*/.stamp_host_installed
+```

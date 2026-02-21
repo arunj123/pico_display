@@ -276,7 +276,7 @@ void MediaControllerDevice::handlePacket(uint8_t packet_type, uint16_t channel, 
         }
         else if (event == HCI_EVENT_DISCONNECTION_COMPLETE) {
              printf("[BLE] Disconnected.\n");
-             if (m_setup_mode) gap_advertisements_enable(1);
+             gap_advertisements_enable(1);
         }
         else if (event == SM_EVENT_JUST_WORKS_REQUEST) {
             printf("[BLE] Just Works Requested -> Confirming.\n");
