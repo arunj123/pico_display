@@ -205,3 +205,41 @@ rm -rf output/target
 find output/ -name ".stamp_target_installed" -delete
 rm -f output/build/host-gcc-final-*/.stamp_host_installed
 ```
+
+---
+
+## 8. Cross-Compilation SDK
+
+The project provides a relocatable SDK for developing applications that target the Pi Zero 2W without having to rebuild the entire OS.
+
+### 8.1. Using the Prebuilt SDK (Recommended)
+1.  **Download:** Get `buildroot-sdk` from the GitHub Actions artifacts.
+2.  **Extract:** `tar -xvf aarch64-buildroot-linux-gnu_sdk-buildroot.tar.gz -C ~/my-sdk`
+3.  **Relocate:** `cd ~/my-sdk && ./relocate-sdk.sh`
+4.  **Usage:** Source the environment-setup script to set up your shell:
+    `source ~/my-sdk/environment-setup`
+
+### 8.2. CMake Setup (Using SDK)
+To use the SDK in a CMake-based project, use the provided toolchain file:
+```bash
+cmake -B build -DCMAKE_TOOLCHAIN_FILE=~/my-sdk/share/buildroot/toolchainfile.cmake
+```
+
+### 8.3. Direct Usage (From Buildroot Output)
+If you have a local `output` directory from a full build, you can use the binaries directly.
+
+**Toolchain File (`pi_toolchain.cmake`):**
+```cmake
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR aarch64)
+
+set(BR_OUTPUT "/path/to/pico_display/output")
+set(CMAKE_C_COMPILER "${BR_OUTPUT}/host/bin/aarch64-buildroot-linux-gnu-gcc")
+set(CMAKE_CXX_COMPILER "${BR_OUTPUT}/host/bin/aarch64-buildroot-linux-gnu-g++")
+set(CMAKE_FIND_ROOT_PATH "${BR_OUTPUT}/host/aarch64-buildroot-linux-gnu/sysroot")
+
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+```
