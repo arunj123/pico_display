@@ -3,7 +3,17 @@ name: Buildroot RPi Image Build
 on:
   push:
     branches: [ master, main ]
+    paths:
+      - 'pi_gateway/**'
+      - 'scripts/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/buildroot_build.yml'
   pull_request:
+    paths:
+      - 'pi_gateway/**'
+      - 'scripts/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/buildroot_build.yml'
   workflow_dispatch:
 
 concurrency:
