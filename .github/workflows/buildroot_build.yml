@@ -22,6 +22,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      sdk_needed: ${{ steps.filter.outputs.configs == 'true' || github.event_name == 'workflow_dispatch' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            configs:
+              - 'pi_gateway/configs/**'
+              - '.github/workflows/buildroot_build.yml'
+
   build:
     runs-on: ubuntu-latest
     # Buildroot builds can take a long time
@@ -62,8 +76,8 @@ jobs:
         export OUTPUT_DIR="${REPO_ROOT}/output"
         export BR_BRANCH="2025.11.x"
         
-        # 1. Clone Buildroot if missing
-        if [ ! -d "$BUILDROOT_DIR" ]; then
+        # 1. Clone Buildroot if missing (Checking for Makefile specifically)
+        if [ ! -f "$BUILDROOT_DIR/Makefile" ]; then
             git clone -b $BR_BRANCH https://git.buildroot.net/buildroot $BUILDROOT_DIR
         fi
         
@@ -89,7 +103,8 @@ jobs:
         path: output/images/sdcard.img
 
   build_sdk:
-    needs: build
+    needs: [build, changes]
+    if: needs.changes.outputs.sdk_needed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -127,7 +142,7 @@ jobs:
         export OUTPUT_DIR="${REPO_ROOT}/output"
         export BR_BRANCH="2025.11.x"
         
-        if [ ! -d "$BUILDROOT_DIR" ]; then
+        if [ ! -f "$BUILDROOT_DIR/Makefile" ]; then
             git clone -b $BR_BRANCH https://git.buildroot.net/buildroot $BUILDROOT_DIR
         fi
         
