@@ -81,3 +81,63 @@ jobs:
       with:
         name: pi-sd-image
         path: output/images/sdcard.img
+
+  build_sdk:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install Buildroot Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential binutils sed make binutils build-essential gcc g++ bash patch gzip bzip2 perl tar cpio unzip rsync file bc wget python3 python3-libusb1 ccache
+
+    - name: Cache Buildroot Downloads
+      uses: actions/cache@v4
+      with:
+        path: buildroot/dl
+        key: ${{ runner.os }}-buildroot-dl-${{ hashFiles('pi_gateway/configs/raspberrypizero2w_64_defconfig') }}
+        restore-keys: |
+          ${{ runner.os }}-buildroot-dl-
+
+    - name: Cache Buildroot ccache
+      uses: actions/cache@v4
+      with:
+        path: ~/.buildroot-ccache
+        key: ${{ runner.os }}-buildroot-ccache-${{ hashFiles('pi_gateway/configs/raspberrypizero2w_64_defconfig') }}
+        restore-keys: |
+          ${{ runner.os }}-buildroot-ccache-
+
+    - name: Build SDK
+      run: |
+        export REPO_ROOT=$(pwd)
+        export BUILDROOT_DIR="${REPO_ROOT}/buildroot"
+        export EXTERNAL_TREE="${REPO_ROOT}/pi_gateway"
+        export OUTPUT_DIR="${REPO_ROOT}/output"
+        export BR_BRANCH="2025.11.x"
+        
+        if [ ! -d "$BUILDROOT_DIR" ]; then
+            git clone -b $BR_BRANCH https://git.buildroot.net/buildroot $BUILDROOT_DIR
+        fi
+        
+        # Configure (using cached dl/ccache)
+        if [ ! -f "$OUTPUT_DIR/.config" ]; then
+            make -C $BUILDROOT_DIR BR2_EXTERNAL="$EXTERNAL_TREE" O="$OUTPUT_DIR" raspberrypizero2w_64_defconfig
+            echo "BR2_CCACHE=y" >> "$OUTPUT_DIR/.config"
+            echo "BR2_CCACHE_DIR=\"$HOME/.buildroot-ccache\"" >> "$OUTPUT_DIR/.config"
+            make -C $OUTPUT_DIR olddefconfig
+        fi
+        
+        # Generate SDK
+        make -C $OUTPUT_DIR sdk
+
+    - name: Upload SDK Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: buildroot-sdk
+        path: output/images/*_sdk-buildroot.tar.gz
