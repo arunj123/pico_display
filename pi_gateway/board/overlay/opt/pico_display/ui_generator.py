@@ -64,17 +64,15 @@ def create_ui_image(time_str: str, date_str: str, weather_info: dict | None, is_
         draw.text((rx, cy + 65), f"{weather_info['temperature']}°C", font=config.FONT_TEMP, fill=primary_color, anchor="ms")
         draw.text((rx, cy + 90), weather_info['description'].title(), font=config.FONT_WEATHER, fill=secondary_color, anchor="ms")
     
-    # Bottom Zone (Details)
+    # Bottom Zone (Details) - Icons only, no labels
     cols = 4; col_w = config.LCD_WIDTH / cols
-    labels = ["Wind", "Humidity", "Sunrise", "Sunset"]
     keys = ["windspeed", "humidity", "sunrise", "sunset"]
     for i in range(cols):
-        cx = int(col_w * (i + 0.5)); y = 172
-        icon = ui_components.draw_info_icon(keys[i].split('speed')[0], (22, 22), secondary_color)
-        image.paste(icon, (cx-11, y), icon)
-        draw.text((cx, y+37), labels[i], font=config.FONT_INFO_HEADER, fill=secondary_color, anchor="ms")
+        cx = int(col_w * (i + 0.5)); y = 168
+        icon = ui_components.draw_info_icon(keys[i].split('speed')[0], (32, 32), secondary_color)
+        image.paste(icon, (cx-16, y), icon)
         val = f"{weather_info[keys[i]]}{' km/h' if i==0 else '%' if i==1 else ''}" if weather_info else "..."
-        draw.text((cx, y+57), val, font=config.FONT_INFO_VALUE, fill=primary_color, anchor="ms")
+        draw.text((cx, y+54), val, font=config.FONT_INFO_VALUE, fill=primary_color, anchor="ms")
 
     return image.convert('RGB')
 

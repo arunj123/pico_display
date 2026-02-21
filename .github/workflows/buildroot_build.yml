@@ -1,0 +1,84 @@
+name: Buildroot RPi Image Build
+
+on:
+  push:
+    branches: [ master, main, 'feature/**' ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Buildroot builds can take a long time
+    timeout-minutes: 360
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install Buildroot Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential binutils sed make binutils build-essential gcc g++ bash patch gzip bzip2 perl tar cpio unzip rsync file bc wget python3 python3-libusb1 ccache
+
+    - name: Cache Buildroot Downloads
+      uses: actions/cache@v4
+      with:
+        path: buildroot/dl
+        key: ${{ runner.os }}-buildroot-dl-${{ hashFiles('pi_gateway/configs/raspberrypizero2w_64_defconfig') }}
+        restore-keys: |
+          ${{ runner.os }}-buildroot-dl-
+
+    - name: Cache Buildroot ccache
+      uses: actions/cache@v4
+      with:
+        path: ~/.buildroot-ccache
+        key: ${{ runner.os }}-buildroot-ccache-${{ hashFiles('pi_gateway/configs/raspberrypizero2w_64_defconfig') }}
+        restore-keys: |
+          ${{ runner.os }}-buildroot-ccache-
+
+    - name: Build Image
+      run: |
+        # Set paths and branch for Buildroot
+        export REPO_ROOT=$(pwd)
+        export BUILDROOT_DIR="${REPO_ROOT}/buildroot"
+        export EXTERNAL_TREE="${REPO_ROOT}/pi_gateway"
+        export OUTPUT_DIR="${REPO_ROOT}/output"
+        export BR_BRANCH="2025.11.x"
+        
+        # 1. Clone Buildroot if missing (though checkout usually handles this if nested)
+        if [ ! -d "$BUILDROOT_DIR" ]; then
+            git clone -b $BR_BRANCH https://git.buildroot.net/buildroot $BUILDROOT_DIR
+        fi
+        
+        # 2. Configure with ccache enabled
+        if [ ! -f "$OUTPUT_DIR/.config" ]; then
+            make -C $BUILDROOT_DIR BR2_EXTERNAL="$EXTERNAL_TREE" O="$OUTPUT_DIR" raspberrypizero2w_64_defconfig
+            
+            # Dynamically enable ccache and set a 5GB limit to stay within GitHub free limits
+            echo "BR2_CCACHE=y" >> "$OUTPUT_DIR/.config"
+            echo "BR2_CCACHE_DIR=\"$HOME/.buildroot-ccache\"" >> "$OUTPUT_DIR/.config"
+            # Set ccache max size (Buildroot-specific variable if supported, otherwise direct ccache call)
+            # Buildroot uses BR2_CCACHE_INITIAL_DIR_SIZE if not set, but we'll set it in the environment
+            export CCACHE_DIR="$HOME/.buildroot-ccache"
+            ccache -M 5G
+            
+            # Refresh config
+            make -C $OUTPUT_DIR olddefconfig
+        fi
+        
+        # 3. Build
+        make -C $OUTPUT_DIR
+
+    - name: Upload SD Image
+      uses: actions/upload-artifact@v4
+      with:
+        name: pi-sd-image
+        path: output/images/sdcard.img

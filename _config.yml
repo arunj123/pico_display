@@ -1,0 +1,14 @@
+exclude:
+  - build/
+  - buildroot/
+  - output/
+  - pi_gateway/
+  - .vscode/
+  - include/
+  - src/
+  - lib/
+  - cmake/
+  - scripts/
+  - config/
+  - generate_local_preview.py
+  - .br2-external.mk
