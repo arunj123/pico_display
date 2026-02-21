@@ -2,7 +2,7 @@ name: Pico Device Build
 
 on:
   push:
-    branches: [ master, main ]
+    branches: [ master, main, 'feature/**' ]
     paths:
       - 'src/**'
       - 'include/**'
@@ -11,6 +11,7 @@ on:
       - 'config/**'
       - '.github/workflows/pico_build.yml'
   pull_request:
+    branches: [ master, main ]
     paths:
       - 'src/**'
       - 'include/**'
