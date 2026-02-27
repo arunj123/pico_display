@@ -8,13 +8,16 @@ arm_64bit=1
 dtoverlay=dwc2
 dtoverlay=miniuart-bt
 
-# 3. Boot Files
+# 3. DRM/KMS with 3D Acceleration (required for display application)
+dtoverlay=vc4-kms-v3d
+
+# 4. Boot Files
 start_file=start.elf
 fixup_file=fixup.dat
 
-# 4. Memory Split (16MB for GPU is enough for headless)
-gpu_mem=16
+# 5. Memory Split (64MB minimum for HW video decode + GLES2 rendering)
+gpu_mem=64
 
-# 5. Boot Speed
+# 6. Boot Speed
 boot_delay=0
 disable_splash=1
