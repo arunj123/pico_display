@@ -71,7 +71,7 @@ BR2_PACKAGE_HARFBUZZ=y
 # Networking
 BR2_PACKAGE_LIBCURL=y
 # Image Decoders
-BR2_PACKAGE_LIBJPEG=y
+BR2_PACKAGE_JPEG=y
 BR2_PACKAGE_LIBPNG=y
 # --- End Display Application Dependencies ---
 BR2_PACKAGE_DROPBEAR=y
